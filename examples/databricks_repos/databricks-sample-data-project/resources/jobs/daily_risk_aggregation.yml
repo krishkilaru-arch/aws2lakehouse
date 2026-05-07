@@ -1,0 +1,23 @@
+resources:
+  jobs:
+    daily_risk_aggregation:
+      name: "[prod] risk/daily_risk_aggregation"
+      description: "Migrated from AWS: delta_table → risk_bronze"
+  schedule:
+    quartz_cron_expression: "0 0 6 * * ? *"
+    timezone_id: "America/New_York"
+    pause_status: UNPAUSED
+      tasks:
+        - task_key: daily_risk_aggregation
+          notebook_task:
+            notebook_path: pipelines/risk/daily_risk_aggregation
+            base_parameters:
+              CATALOG: "acme_prod"
+              SCHEMA: "risk_bronze"
+              TABLE: "daily_risk_aggregation"
+          max_retries: 2
+          timeout_seconds: 3600
+      tags:
+        domain: "risk"
+        layer: "bronze"
+        classification: "internal"

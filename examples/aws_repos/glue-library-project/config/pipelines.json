@@ -1,0 +1,53 @@
+
+{
+  "pipelines": {
+    "customer_dimension": {
+      "schedule": "cron(0 2 * * ? *)",
+      "glue_version": "4.0",
+      "worker_type": "G.2X",
+      "num_workers": 10,
+      "timeout_minutes": 120,
+      "extra_py_files": "s3://acme-libs/acme_etl-3.2.1-py3-none-any.whl",
+      "connections": ["crm-postgres"],
+      "tags": {"domain": "customer", "classification": "confidential", "owner": "data-eng"}
+    },
+    "order_events_processing": {
+      "schedule": "cron(0 * * * ? *)",
+      "glue_version": "4.0",
+      "worker_type": "G.1X",
+      "num_workers": 5,
+      "timeout_minutes": 30,
+      "extra_py_files": "s3://acme-libs/acme_etl-3.2.1-py3-none-any.whl",
+      "triggers": [{"type": "s3_event", "bucket": "acme-landing", "prefix": "orders/"}],
+      "tags": {"domain": "commerce", "classification": "internal", "owner": "data-eng"}
+    },
+    "financial_reconciliation": {
+      "schedule": "cron(0 7 * * ? *)",
+      "glue_version": "4.0",
+      "worker_type": "G.2X",
+      "num_workers": 8,
+      "timeout_minutes": 90,
+      "extra_py_files": "s3://acme-libs/acme_etl-3.2.1-py3-none-any.whl",
+      "connections": ["finance-postgres"],
+      "tags": {"domain": "finance", "classification": "confidential", "owner": "finance-eng"}
+    },
+    "feature_store_builder": {
+      "schedule": "cron(0 2 ? * SUN *)",
+      "glue_version": "4.0",
+      "worker_type": "G.2X",
+      "num_workers": 20,
+      "timeout_minutes": 180,
+      "extra_py_files": "s3://acme-libs/acme_etl-3.2.1-py3-none-any.whl",
+      "tags": {"domain": "ml", "classification": "internal", "owner": "ml-team"}
+    },
+    "vendor_data_ingestion": {
+      "schedule": "cron(*/15 * * * ? *)",
+      "glue_version": "4.0",
+      "worker_type": "G.1X",
+      "num_workers": 3,
+      "timeout_minutes": 15,
+      "extra_py_files": "s3://acme-libs/acme_etl-3.2.1-py3-none-any.whl",
+      "tags": {"domain": "market-data", "classification": "mnpi", "owner": "data-eng"}
+    }
+  }
+}

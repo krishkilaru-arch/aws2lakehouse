@@ -1,0 +1,19 @@
+resources:
+  jobs:
+    nav_calculation_job:
+      name: "[prod] finance/nav_calculation_job"
+      description: "Migrated from AWS: jdbc → finance_bronze"
+      tasks:
+        - task_key: nav_calculation_job
+          notebook_task:
+            notebook_path: pipelines/finance/nav_calculation_job
+            base_parameters:
+              CATALOG: "acme_prod"
+              SCHEMA: "finance_bronze"
+              TABLE: "nav_calculation_job"
+          max_retries: 2
+          timeout_seconds: 3600
+      tags:
+        domain: "finance"
+        layer: "bronze"
+        classification: "internal"

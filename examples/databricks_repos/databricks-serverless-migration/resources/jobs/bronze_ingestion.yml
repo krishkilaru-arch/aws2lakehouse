@@ -1,0 +1,19 @@
+resources:
+  jobs:
+    bronze_ingestion:
+      name: "[prod] finance/bronze_ingestion"
+      description: "Migrated from AWS: auto_loader → finance_bronze"
+      tasks:
+        - task_key: bronze_ingestion
+          notebook_task:
+            notebook_path: pipelines/finance/bronze_ingestion
+            base_parameters:
+              CATALOG: "acme_prod"
+              SCHEMA: "finance_bronze"
+              TABLE: "bronze_ingestion"
+          max_retries: 2
+          timeout_seconds: 3600
+      tags:
+        domain: "finance"
+        layer: "bronze"
+        classification: "internal"

@@ -1,0 +1,19 @@
+resources:
+  jobs:
+    vendor_file_ingestion:
+      name: "[prod] finance/vendor_file_ingestion"
+      description: "Migrated from AWS: auto_loader → finance_bronze"
+      tasks:
+        - task_key: vendor_file_ingestion
+          notebook_task:
+            notebook_path: pipelines/finance/vendor_file_ingestion
+            base_parameters:
+              CATALOG: "production"
+              SCHEMA: "finance_bronze"
+              TABLE: "vendor_file_ingestion"
+          max_retries: 2
+          timeout_seconds: 3600
+      tags:
+        domain: "finance"
+        layer: "bronze"
+        classification: "internal"

@@ -1,0 +1,19 @@
+resources:
+  jobs:
+    market_data_ingest_job:
+      name: "[prod] finance/market_data_ingest_job"
+      description: "Migrated from AWS: auto_loader → finance_bronze"
+      tasks:
+        - task_key: market_data_ingest_job
+          notebook_task:
+            notebook_path: pipelines/finance/market_data_ingest_job
+            base_parameters:
+              CATALOG: "acme_prod"
+              SCHEMA: "finance_bronze"
+              TABLE: "market_data_ingest_job"
+          max_retries: 2
+          timeout_seconds: 3600
+      tags:
+        domain: "finance"
+        layer: "bronze"
+        classification: "internal"

@@ -1,0 +1,19 @@
+resources:
+  jobs:
+    trade_events_streaming:
+      name: "[prod] risk/trade_events_streaming"
+      description: "Migrated from AWS: kafka → risk_bronze"
+      tasks:
+        - task_key: trade_events_streaming
+          notebook_task:
+            notebook_path: pipelines/risk/trade_events_streaming
+            base_parameters:
+              CATALOG: "acme_prod"
+              SCHEMA: "risk_bronze"
+              TABLE: "trade_events_streaming"
+          max_retries: 2
+          timeout_seconds: 3600
+      tags:
+        domain: "risk"
+        layer: "bronze"
+        classification: "mnpi"

@@ -1,0 +1,19 @@
+resources:
+  jobs:
+    trade_events_ingestion:
+      name: "[prod] risk/trade_events_ingestion"
+      description: "Migrated from AWS: kafka → risk_bronze"
+      tasks:
+        - task_key: trade_events_ingestion
+          notebook_task:
+            notebook_path: pipelines/risk/trade_events_ingestion
+            base_parameters:
+              CATALOG: "production"
+              SCHEMA: "risk_bronze"
+              TABLE: "trade_events_ingestion"
+          max_retries: 2
+          timeout_seconds: 3600
+      tags:
+        domain: "risk"
+        layer: "bronze"
+        classification: "mnpi"

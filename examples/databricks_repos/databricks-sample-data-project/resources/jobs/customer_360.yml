@@ -1,0 +1,23 @@
+resources:
+  jobs:
+    customer_360:
+      name: "[prod] customer/customer_360"
+      description: "Migrated from AWS: kafka → customer_bronze"
+  schedule:
+    quartz_cron_expression: "0 0 4 * * ? *"
+    timezone_id: "America/New_York"
+    pause_status: UNPAUSED
+      tasks:
+        - task_key: customer_360
+          notebook_task:
+            notebook_path: pipelines/customer/customer_360
+            base_parameters:
+              CATALOG: "acme_prod"
+              SCHEMA: "customer_bronze"
+              TABLE: "customer_360"
+          max_retries: 2
+          timeout_seconds: 3600
+      tags:
+        domain: "customer"
+        layer: "bronze"
+        classification: "confidential"

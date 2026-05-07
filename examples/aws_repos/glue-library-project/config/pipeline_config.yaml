@@ -1,0 +1,55 @@
+# Pipeline configuration for all Glue jobs
+# Loaded by: PipelineConfig.from_s3(bucket, key, environment)
+
+prod:
+  bloomberg_bucket: acme-vendor-drops
+  data_lake_bucket: acme-data-lake
+  artifacts_bucket: acme-artifacts
+  
+  connections:
+    oms:
+      host: oms-prod.cluster-xyz.us-east-1.rds.amazonaws.com
+      port: 5432
+      database: oms_production
+      secret_name: prod/oms-postgres
+    
+    custodian:
+      host: statestreet-feed.xyz.com
+      port: 5432
+      database: custody_feeds
+      secret_name: prod/statestreet-sftp-db
+    
+    redshift:
+      host: acme-cluster.xyz.us-east-1.redshift.amazonaws.com
+      port: 5439
+      database: analytics
+      secret_name: prod/redshift-etl
+  
+  quality:
+    fail_on_error: true
+    null_threshold: 0.01
+    staleness_minutes: 120
+  
+  encryption:
+    kms_key_id: arn:aws:kms:us-east-1:123456789:key/abc-123-def-456
+    encrypted_columns:
+      - account_holder_name
+      - tax_id
+      - ssn
+
+staging:
+  bloomberg_bucket: acme-vendor-drops-staging
+  data_lake_bucket: acme-data-lake-staging
+  artifacts_bucket: acme-artifacts
+  
+  connections:
+    oms:
+      host: oms-staging.cluster-xyz.us-east-1.rds.amazonaws.com
+      port: 5432
+      database: oms_staging
+      secret_name: staging/oms-postgres
+  
+  quality:
+    fail_on_error: false
+    null_threshold: 0.05
+    staleness_minutes: 240

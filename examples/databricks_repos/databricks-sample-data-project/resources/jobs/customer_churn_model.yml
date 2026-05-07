@@ -1,0 +1,23 @@
+resources:
+  jobs:
+    customer_churn_model:
+      name: "[prod] analytics/customer_churn_model"
+      description: "Migrated from AWS: delta_table → analytics_bronze"
+  schedule:
+    quartz_cron_expression: "0 0 2 ? * 0 *"
+    timezone_id: "America/New_York"
+    pause_status: UNPAUSED
+      tasks:
+        - task_key: customer_churn_model
+          notebook_task:
+            notebook_path: pipelines/analytics/customer_churn_model
+            base_parameters:
+              CATALOG: "acme_prod"
+              SCHEMA: "analytics_bronze"
+              TABLE: "customer_churn_model"
+          max_retries: 2
+          timeout_seconds: 3600
+      tags:
+        domain: "analytics"
+        layer: "bronze"
+        classification: "internal"

@@ -1,0 +1,23 @@
+resources:
+  jobs:
+    ecommerce_daily_etl:
+      name: "[prod] analytics/ecommerce_daily_etl"
+      description: "Migrated from AWS: delta_table → analytics_bronze"
+  schedule:
+    quartz_cron_expression: "0 0 3 * * ? *"
+    timezone_id: "America/New_York"
+    pause_status: UNPAUSED
+      tasks:
+        - task_key: ecommerce_daily_etl
+          notebook_task:
+            notebook_path: pipelines/analytics/ecommerce_daily_etl
+            base_parameters:
+              CATALOG: "ecommerce_prod"
+              SCHEMA: "analytics_bronze"
+              TABLE: "ecommerce_daily_etl"
+          max_retries: 2
+          timeout_seconds: 3600
+      tags:
+        domain: "analytics"
+        layer: "bronze"
+        classification: "internal"

@@ -1,0 +1,19 @@
+resources:
+  jobs:
+    order_events_processing:
+      name: "[prod] finance/order_events_processing"
+      description: "Migrated from AWS: auto_loader → finance_bronze"
+      tasks:
+        - task_key: order_events_processing
+          notebook_task:
+            notebook_path: pipelines/finance/order_events_processing
+            base_parameters:
+              CATALOG: "acme_prod"
+              SCHEMA: "finance_bronze"
+              TABLE: "order_events_processing"
+          max_retries: 2
+          timeout_seconds: 3600
+      tags:
+        domain: "finance"
+        layer: "bronze"
+        classification: "internal"

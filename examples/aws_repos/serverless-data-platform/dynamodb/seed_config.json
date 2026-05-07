@@ -1,0 +1,103 @@
+{
+  "config_items": [
+    {
+      "config_key": "pipeline_vitals",
+      "source_system": "vitals",
+      "schedule": "event-driven",
+      "validation_rules": {
+        "required_fields": [
+          "patient_id",
+          "device_id",
+          "timestamp",
+          "measurement_type",
+          "value"
+        ],
+        "max_file_size_mb": 500,
+        "allowed_formats": [
+          "json",
+          "csv"
+        ]
+      },
+      "retention_days": {
+        "bronze": 90,
+        "silver": 365,
+        "gold": 2555
+      }
+    },
+    {
+      "config_key": "pipeline_lab_results",
+      "source_system": "lab_results",
+      "schedule": "event-driven",
+      "validation_rules": {
+        "required_fields": [
+          "patient_id",
+          "test_code",
+          "result_value",
+          "collected_at"
+        ],
+        "max_file_size_mb": 200,
+        "allowed_formats": [
+          "json",
+          "hl7_fhir"
+        ]
+      },
+      "retention_days": {
+        "bronze": 90,
+        "silver": 730,
+        "gold": 2555
+      }
+    },
+    {
+      "config_key": "pipeline_medications",
+      "source_system": "medications",
+      "schedule": "event-driven",
+      "validation_rules": {
+        "required_fields": [
+          "patient_id",
+          "drug_code",
+          "dosage",
+          "prescribed_at"
+        ],
+        "max_file_size_mb": 100,
+        "allowed_formats": [
+          "json",
+          "csv"
+        ]
+      },
+      "retention_days": {
+        "bronze": 90,
+        "silver": 730,
+        "gold": 2555
+      }
+    },
+    {
+      "config_key": "alert_thresholds",
+      "vitals": {
+        "heart_rate_high": 120,
+        "heart_rate_low": 50,
+        "blood_pressure_systolic_high": 180,
+        "oxygen_saturation_low": 90,
+        "temperature_high": 103,
+        "blood_glucose_high": 400,
+        "blood_glucose_low": 50
+      }
+    },
+    {
+      "config_key": "notification_config",
+      "channels": {
+        "critical": {
+          "sns_topic": "arn:aws:sns:us-east-1:123456789:medstream-critical",
+          "pagerduty": true,
+          "slack": "#icu-alerts"
+        },
+        "warning": {
+          "sns_topic": "arn:aws:sns:us-east-1:123456789:medstream-alerts",
+          "slack": "#data-quality"
+        },
+        "info": {
+          "slack": "#data-pipeline-status"
+        }
+      }
+    }
+  ]
+}

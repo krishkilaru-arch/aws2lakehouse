@@ -1,0 +1,74 @@
+{
+  "source": "vendor_invoices",
+  "format": "csv",
+  "delimiter": ",",
+  "header": true,
+  "landing_path": "s3://acme-vendor-drops/invoices/",
+  "columns": [
+    {
+      "name": "vendor_id",
+      "type": "string",
+      "nullable": false
+    },
+    {
+      "name": "invoice_number",
+      "type": "string",
+      "nullable": false
+    },
+    {
+      "name": "amount",
+      "type": "decimal(15,2)",
+      "nullable": false
+    },
+    {
+      "name": "currency",
+      "type": "string",
+      "nullable": false,
+      "allowed_values": [
+        "USD",
+        "EUR",
+        "GBP"
+      ]
+    },
+    {
+      "name": "invoice_date",
+      "type": "date",
+      "format": "yyyy-MM-dd"
+    },
+    {
+      "name": "due_date",
+      "type": "date",
+      "format": "yyyy-MM-dd"
+    },
+    {
+      "name": "status",
+      "type": "string",
+      "allowed_values": [
+        "pending",
+        "paid",
+        "overdue",
+        "disputed"
+      ]
+    },
+    {
+      "name": "description",
+      "type": "string",
+      "nullable": true,
+      "max_length": 500
+    }
+  ],
+  "quality_rules": [
+    {
+      "name": "valid_amount",
+      "condition": "amount > 0 AND amount < 100000000"
+    },
+    {
+      "name": "valid_currency",
+      "condition": "currency IN ('USD','EUR','GBP')"
+    },
+    {
+      "name": "due_after_invoice",
+      "condition": "due_date >= invoice_date"
+    }
+  ]
+}

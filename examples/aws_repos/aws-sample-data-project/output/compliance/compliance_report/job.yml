@@ -1,0 +1,23 @@
+resources:
+  jobs:
+    compliance_report:
+      name: "[prod] compliance/compliance_report"
+      description: "Migrated from AWS: delta_table → compliance_bronze"
+  schedule:
+    quartz_cron_expression: "0 0 8 * * ? *"
+    timezone_id: "America/New_York"
+    pause_status: UNPAUSED
+      tasks:
+        - task_key: compliance_report
+          notebook_task:
+            notebook_path: pipelines/compliance/compliance_report
+            base_parameters:
+              CATALOG: "production"
+              SCHEMA: "compliance_bronze"
+              TABLE: "compliance_report"
+          max_retries: 2
+          timeout_seconds: 3600
+      tags:
+        domain: "compliance"
+        layer: "bronze"
+        classification: "confidential"

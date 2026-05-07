@@ -1,0 +1,84 @@
+
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Acme ETL Platform - Glue Jobs + IAM + Triggers
+
+Resources:
+  GlueJobRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: AcmeGlueJobRole
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: glue.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSGlueServiceRole
+      Policies:
+        - PolicyName: AcmeS3Access
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: ["s3:GetObject", "s3:PutObject", "s3:ListBucket"]
+                Resource:
+                  - "arn:aws:s3:::acme-landing/*"
+                  - "arn:aws:s3:::acme-data-lake/*"
+                  - "arn:aws:s3:::acme-libs/*"
+                  - "arn:aws:s3:::acme-feature-store/*"
+        - PolicyName: AcmeSecretsAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: "arn:aws:secretsmanager:us-east-1:*:secret:prod/*"
+
+  CustomerDimensionJob:
+    Type: AWS::Glue::Job
+    Properties:
+      Name: customer_dimension
+      Role: !GetAtt GlueJobRole.Arn
+      Command:
+        Name: glueetl
+        ScriptLocation: s3://acme-scripts/customer_dimension.py
+        PythonVersion: "3"
+      DefaultArguments:
+        "--extra-py-files": "s3://acme-libs/acme_etl-3.2.1-py3-none-any.whl"
+        "--enable-metrics": ""
+        "--enable-spark-ui": "true"
+      GlueVersion: "4.0"
+      WorkerType: G.2X
+      NumberOfWorkers: 10
+      Timeout: 120
+
+  DailyTrigger:
+    Type: AWS::Glue::Trigger
+    Properties:
+      Name: daily_2am_trigger
+      Type: SCHEDULED
+      Schedule: "cron(0 2 * * ? *)"
+      Actions:
+        - JobName: customer_dimension
+      StartOnCreation: true
+
+  AuditTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: etl_audit_log
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pipeline_name
+          AttributeType: S
+        - AttributeName: execution_time
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pipeline_name
+          KeyType: HASH
+        - AttributeName: execution_time
+          KeyType: RANGE
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true

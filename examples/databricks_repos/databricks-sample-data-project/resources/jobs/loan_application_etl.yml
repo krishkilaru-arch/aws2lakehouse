@@ -1,0 +1,23 @@
+resources:
+  jobs:
+    loan_application_etl:
+      name: "[prod] lending/loan_application_etl"
+      description: "Migrated from AWS: jdbc → lending_bronze"
+  schedule:
+    quartz_cron_expression: "0 0 * * * ? *"
+    timezone_id: "America/New_York"
+    pause_status: UNPAUSED
+      tasks:
+        - task_key: loan_application_etl
+          notebook_task:
+            notebook_path: pipelines/lending/loan_application_etl
+            base_parameters:
+              CATALOG: "acme_prod"
+              SCHEMA: "lending_bronze"
+              TABLE: "loan_application_etl"
+          max_retries: 2
+          timeout_seconds: 3600
+      tags:
+        domain: "lending"
+        layer: "bronze"
+        classification: "confidential"

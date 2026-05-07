@@ -1,0 +1,157 @@
+
+{
+  "Comment": "Serverless Data Pipeline: File Arrival → Validate → Bronze → Silver → Gold → Notify",
+  "StartAt": "ResolveConfig",
+  "States": {
+    "ResolveConfig": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:us-east-1:123456789:function:config_resolver",
+      "Next": "ValidateInput",
+      "Retry": [{"ErrorEquals": ["States.ALL"], "MaxAttempts": 2, "BackoffRate": 2}]
+    },
+    "ValidateInput": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:us-east-1:123456789:function:data_validator",
+      "Next": "CheckValidation",
+      "Retry": [{"ErrorEquals": ["States.ALL"], "MaxAttempts": 1}]
+    },
+    "CheckValidation": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.validation.status",
+          "StringEquals": "PASSED",
+          "Next": "BronzeLayer"
+        }
+      ],
+      "Default": "HandleValidationFailure"
+    },
+    "BronzeLayer": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::glue:startJobRun.sync",
+      "Parameters": {
+        "JobName": "bronze_ingestion",
+        "Arguments": {
+          "--source_bucket.$": "$.bucket",
+          "--source_key.$": "$.key",
+          "--source_name.$": "$.source_name",
+          "--target_path": "s3://acme-lakehouse/bronze/",
+          "--config.$": "States.JsonToString($.resolved_config)"
+        }
+      },
+      "ResultPath": "$.bronze_result",
+      "Next": "SilverLayer",
+      "Retry": [{"ErrorEquals": ["States.ALL"], "MaxAttempts": 2, "BackoffRate": 2}],
+      "Catch": [{"ErrorEquals": ["States.ALL"], "Next": "HandleProcessingFailure"}]
+    },
+    "SilverLayer": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::glue:startJobRun.sync",
+      "Parameters": {
+        "JobName": "silver_transformation",
+        "Arguments": {
+          "--source_path": "s3://acme-lakehouse/bronze/",
+          "--source_name.$": "$.source_name",
+          "--target_path": "s3://acme-lakehouse/silver/",
+          "--config.$": "States.JsonToString($.resolved_config)"
+        }
+      },
+      "ResultPath": "$.silver_result",
+      "Next": "QualityGate",
+      "Retry": [{"ErrorEquals": ["States.ALL"], "MaxAttempts": 2, "BackoffRate": 2}],
+      "Catch": [{"ErrorEquals": ["States.ALL"], "Next": "HandleProcessingFailure"}]
+    },
+    "QualityGate": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:us-east-1:123456789:function:dq_checker",
+      "Next": "CheckQuality",
+      "Retry": [{"ErrorEquals": ["States.ALL"], "MaxAttempts": 1}]
+    },
+    "CheckQuality": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.quality_gate.status",
+          "StringEquals": "PASSED",
+          "Next": "CheckGoldEnabled"
+        }
+      ],
+      "Default": "HandleQualityFailure"
+    },
+    "CheckGoldEnabled": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.resolved_config.features.enable_gold_layer",
+          "BooleanEquals": true,
+          "Next": "GoldLayer"
+        }
+      ],
+      "Default": "NotifySuccess"
+    },
+    "GoldLayer": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::glue:startJobRun.sync",
+      "Parameters": {
+        "JobName": "gold_aggregation",
+        "Arguments": {
+          "--source_path": "s3://acme-lakehouse/silver/",
+          "--source_name.$": "$.source_name",
+          "--target_path": "s3://acme-lakehouse/gold/",
+          "--config.$": "States.JsonToString($.resolved_config)"
+        }
+      },
+      "ResultPath": "$.gold_result",
+      "Next": "NotifySuccess",
+      "Retry": [{"ErrorEquals": ["States.ALL"], "MaxAttempts": 2}],
+      "Catch": [{"ErrorEquals": ["States.ALL"], "Next": "HandleProcessingFailure"}]
+    },
+    "NotifySuccess": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:us-east-1:123456789:function:notification_handler",
+      "Parameters": {
+        "source_name.$": "$.source_name",
+        "execution_id.$": "$.execution_id",
+        "final_status": "SUCCESS",
+        "row_count.$": "$.silver_result.Arguments.row_count",
+        "duration_seconds": 0
+      },
+      "End": true
+    },
+    "HandleValidationFailure": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:us-east-1:123456789:function:notification_handler",
+      "Parameters": {
+        "source_name.$": "$.source_name",
+        "execution_id.$": "$.execution_id",
+        "final_status": "FAILED",
+        "failure_stage": "VALIDATION",
+        "validation.$": "$.validation"
+      },
+      "End": true
+    },
+    "HandleQualityFailure": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:us-east-1:123456789:function:notification_handler",
+      "Parameters": {
+        "source_name.$": "$.source_name",
+        "execution_id.$": "$.execution_id",
+        "final_status": "FAILED",
+        "failure_stage": "QUALITY_GATE",
+        "quality_gate.$": "$.quality_gate"
+      },
+      "End": true
+    },
+    "HandleProcessingFailure": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:us-east-1:123456789:function:notification_handler",
+      "Parameters": {
+        "source_name.$": "$.source_name",
+        "execution_id.$": "$.execution_id",
+        "final_status": "FAILED",
+        "failure_stage": "PROCESSING"
+      },
+      "End": true
+    }
+  }
+}

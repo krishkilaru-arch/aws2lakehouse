@@ -1,0 +1,19 @@
+resources:
+  jobs:
+    financial_reconciliation:
+      name: "[prod] finance/financial_reconciliation"
+      description: "Migrated from AWS: jdbc → finance_bronze"
+      tasks:
+        - task_key: financial_reconciliation
+          notebook_task:
+            notebook_path: pipelines/finance/financial_reconciliation
+            base_parameters:
+              CATALOG: "acme_prod"
+              SCHEMA: "finance_bronze"
+              TABLE: "financial_reconciliation"
+          max_retries: 2
+          timeout_seconds: 3600
+      tags:
+        domain: "finance"
+        layer: "bronze"
+        classification: "confidential"

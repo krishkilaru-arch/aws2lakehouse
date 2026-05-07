@@ -1,0 +1,23 @@
+resources:
+  jobs:
+    session_analytics:
+      name: "[prod] analytics/session_analytics"
+      description: "Migrated from AWS: mongodb → analytics_bronze"
+  schedule:
+    quartz_cron_expression: "0 0 * * * ? *"
+    timezone_id: "America/New_York"
+    pause_status: UNPAUSED
+      tasks:
+        - task_key: session_analytics
+          notebook_task:
+            notebook_path: pipelines/analytics/session_analytics
+            base_parameters:
+              CATALOG: "production"
+              SCHEMA: "analytics_bronze"
+              TABLE: "session_analytics"
+          max_retries: 2
+          timeout_seconds: 3600
+      tags:
+        domain: "analytics"
+        layer: "bronze"
+        classification: "internal"

@@ -1,0 +1,23 @@
+resources:
+  jobs:
+    payment_processing:
+      name: "[prod] lending/payment_processing"
+      description: "Migrated from AWS: jdbc → lending_bronze"
+  schedule:
+    quartz_cron_expression: "0 */15 * * * ? *"
+    timezone_id: "America/New_York"
+    pause_status: UNPAUSED
+      tasks:
+        - task_key: payment_processing
+          notebook_task:
+            notebook_path: pipelines/lending/payment_processing
+            base_parameters:
+              CATALOG: "acme_prod"
+              SCHEMA: "lending_bronze"
+              TABLE: "payment_processing"
+          max_retries: 2
+          timeout_seconds: 3600
+      tags:
+        domain: "lending"
+        layer: "bronze"
+        classification: "confidential"

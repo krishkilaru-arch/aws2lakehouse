@@ -1,0 +1,63 @@
+{
+  "Comment": "Daily compliance report generation",
+  "StartAt": "WaitForUpstream",
+  "States": {
+    "WaitForUpstream": {
+      "Type": "Wait",
+      "Seconds": 300,
+      "Next": "CheckDataReady"
+    },
+    "CheckDataReady": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:us-east-1:123456789:function:check-s3-partitions",
+      "Parameters": {
+        "paths": [
+          "s3://acme-data-lake/curated/loan_applications/",
+          "s3://acme-data-lake/curated/customer_360/",
+          "s3://acme-data-lake/curated/payments/"
+        ]
+      },
+      "Next": "DataReadyChoice"
+    },
+    "DataReadyChoice": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.all_ready",
+          "BooleanEquals": true,
+          "Next": "GenerateReport"
+        }
+      ],
+      "Default": "WaitForUpstream"
+    },
+    "GenerateReport": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::emr:addStep.sync",
+      "Parameters": {
+        "ClusterId": "j-COMPLIANCE01",
+        "Step": {
+          "Name": "Generate Compliance Report",
+          "HadoopJarStep": {
+            "Jar": "command-runner.jar",
+            "Args": [
+              "spark-submit",
+              "--master",
+              "yarn",
+              "s3://acme-jars/compliance-reporter-3.0.jar",
+              "--report-date",
+              "today",
+              "--output",
+              "s3://acme-compliance-reports/"
+            ]
+          }
+        }
+      },
+      "Next": "UploadToSharepoint"
+    },
+    "UploadToSharepoint": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:us-east-1:123456789:function:upload-sharepoint",
+      "End": true
+    }
+  }
+}

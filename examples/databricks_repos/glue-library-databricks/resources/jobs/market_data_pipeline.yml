@@ -1,0 +1,20 @@
+resources:
+  jobs:
+    market_data_pipeline:
+      name: "[prod] market-data/daily-ingest"
+      schedule:
+        quartz_cron_expression: "0 0 11 * * ? *"
+        timezone_id: "America/New_York"
+      tasks:
+        - task_key: ingest_bloomberg
+          notebook_task:
+            notebook_path: src/pipelines/market_data/bronze/market_data_ingest
+          libraries:
+            - whl: /Volumes/production/libraries/acme_datalib-3.0.0-py3-none-any.whl
+        - task_key: risk_aggregation
+          depends_on: [{task_key: ingest_bloomberg}]
+          notebook_task:
+            notebook_path: src/pipelines/risk/silver/risk_aggregation
+      tags:
+        domain: market-data
+        classification: mnpi

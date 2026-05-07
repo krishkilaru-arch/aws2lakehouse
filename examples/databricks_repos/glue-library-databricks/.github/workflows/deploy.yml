@@ -1,0 +1,22 @@
+name: Build Library + Deploy
+on:
+  push:
+    branches: [main]
+jobs:
+  build-library:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11"}
+      - run: |
+          cd lib && pip install wheel && python setup.py bdist_wheel
+          # Upload wheel to Volume
+          databricks fs cp lib/dist/*.whl /Volumes/production/libraries/
+  deploy-pipelines:
+    needs: build-library
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: databricks/setup-cli@main
+      - run: databricks bundle deploy --target production

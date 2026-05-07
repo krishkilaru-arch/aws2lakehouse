@@ -1,0 +1,17 @@
+resources:
+  jobs:
+    event_streaming:
+      name: "[prod] events/kafka-streaming"
+      description: "Replaces long-running EMR streaming cluster"
+      schedule:
+        quartz_cron_expression: "0 */5 * * * ? *"
+        timezone_id: "UTC"
+      tasks:
+        - task_key: stream_events
+          notebook_task:
+            notebook_path: src/pipelines/events/bronze/stream_events
+            base_parameters: {CATALOG: "production"}
+      tags:
+        domain: events
+        pattern: streaming
+        replaces: emr/j-STREAMING-CLUSTER-01

@@ -1,0 +1,131 @@
+{
+  "Comment": "Customer 360 Pipeline - Orchestrates multi-source data fusion",
+  "StartAt": "ExtractSources",
+  "States": {
+    "ExtractSources": {
+      "Type": "Parallel",
+      "Branches": [
+        {
+          "StartAt": "ExtractPostgres",
+          "States": {
+            "ExtractPostgres": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::glue:startJobRun.sync",
+              "Parameters": {
+                "JobName": "customer-extract-rds",
+                "Arguments": {
+                  "--source_table": "public.customers",
+                  "--target_path": "s3://acme-data-lake/raw/customer_360/rds/"
+                }
+              },
+              "End": true
+            }
+          }
+        },
+        {
+          "StartAt": "ExtractMongoDB",
+          "States": {
+            "ExtractMongoDB": {
+              "Type": "Task",
+              "Resource": "arn:aws:lambda:us-east-1:123456789:function:extract-mongodb-sessions",
+              "Parameters": {
+                "collection": "user_sessions",
+                "lookback_hours": 48
+              },
+              "End": true
+            }
+          }
+        },
+        {
+          "StartAt": "ExtractPayments",
+          "States": {
+            "ExtractPayments": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::glue:startJobRun.sync",
+              "Parameters": {
+                "JobName": "customer-extract-payments",
+                "Arguments": {
+                  "--source_table": "public.payments",
+                  "--target_path": "s3://acme-data-lake/raw/customer_360/payments/"
+                }
+              },
+              "End": true
+            }
+          }
+        }
+      ],
+      "Next": "ValidateExtracts"
+    },
+    "ValidateExtracts": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:us-east-1:123456789:function:validate-row-counts",
+      "Next": "CheckValidation"
+    },
+    "CheckValidation": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.validation_passed",
+          "BooleanEquals": true,
+          "Next": "BuildProfile"
+        }
+      ],
+      "Default": "NotifyFailure"
+    },
+    "BuildProfile": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::emr:addStep.sync",
+      "Parameters": {
+        "ClusterId": "j-ANALYTICS01",
+        "Step": {
+          "Name": "Build Customer 360",
+          "HadoopJarStep": {
+            "Jar": "command-runner.jar",
+            "Args": [
+              "spark-submit",
+              "--class",
+              "com.acme.Customer360Builder",
+              "--master",
+              "yarn",
+              "--deploy-mode",
+              "cluster",
+              "--num-executors",
+              "10",
+              "--executor-memory",
+              "8g",
+              "s3://acme-jars/customer-360-1.2.jar"
+            ]
+          }
+        }
+      },
+      "Next": "LoadRedshift"
+    },
+    "LoadRedshift": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:us-east-1:123456789:function:load-redshift",
+      "Parameters": {
+        "source": "s3://acme-data-lake/curated/customer_360/",
+        "target_table": "analytics.customer_360"
+      },
+      "Next": "NotifySuccess"
+    },
+    "NotifySuccess": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "TopicArn": "arn:aws:sns:us-east-1:123456789:data-pipeline-alerts",
+        "Message": "Customer 360 pipeline completed successfully"
+      },
+      "End": true
+    },
+    "NotifyFailure": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "TopicArn": "arn:aws:sns:us-east-1:123456789:data-pipeline-alerts",
+        "Message": "Customer 360 pipeline FAILED - validation did not pass"
+      },
+      "End": true
+    }
+  }
+}

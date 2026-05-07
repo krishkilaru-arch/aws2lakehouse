@@ -1,0 +1,17 @@
+bundle:
+  name: acme-capital-data-platform
+
+workspace:
+  host: https://dbc-9c8b157f-c542.cloud.databricks.com
+
+targets:
+  dev:
+    mode: development
+    default: true
+  production:
+    mode: production
+    run_as:
+      service_principal_name: acme-data-platform-sp
+
+include:
+  - resources/jobs/*.yml

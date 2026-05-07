@@ -1,0 +1,300 @@
+# 3. Target Architecture & Governance
+
+## Purpose
+
+Define the target-state Lakehouse architecture with enterprise governance that meets financial services compliance requirements (MNPI, PII, SOX).
+
+---
+
+## 3.1 Lakehouse Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                        DATABRICKS LAKEHOUSE PLATFORM                             │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                 │
+│  ┌───────────────────────────────────────────────────────────────────────────┐  │
+│  │                      UNITY CATALOG (Governance Layer)                      │  │
+│  │  Catalogs → Schemas → Tables/Views/Volumes/Functions/Models               │  │
+│  │  Access Control │ Column Masks │ Row Filters │ Lineage │ Audit            │  │
+│  └───────────────────────────────────────────────────────────────────────────┘  │
+│                                                                                 │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
+│  │   BRONZE    │  │   SILVER    │  │    GOLD     │  │    FEATURES / ML    │  │
+│  │  (Raw)      │→ │  (Curated)  │→ │  (Serving)  │→ │  (Mosaic AI)        │  │
+│  │             │  │             │  │             │  │                     │  │
+│  │ Auto Loader │  │ SDP / NB    │  │ SDP / NB    │  │ Feature Store       │  │
+│  │ Kafka       │  │ Expectations│  │ Aggregates  │  │ Model Serving       │  │
+│  │ JDBC        │  │ DQ Gates    │  │ Star Schema │  │ Vector Search       │  │
+│  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────────────┘  │
+│                                                                                 │
+│  ┌───────────────────────────────────────────────────────────────────────────┐  │
+│  │                    COMPUTE (Serverless + Job Clusters)                     │  │
+│  │  Streaming: Always-on │ Batch: Job clusters │ Interactive: Shared/SQL WH  │  │
+│  └───────────────────────────────────────────────────────────────────────────┘  │
+│                                                                                 │
+│  ┌───────────────────────────────────────────────────────────────────────────┐  │
+│  │                    STORAGE (Delta Lake on Cloud Storage)                   │  │
+│  │  ACID │ Time Travel │ Z-ORDER │ Liquid Clustering │ Deletion Vectors      │  │
+│  └───────────────────────────────────────────────────────────────────────────┘  │
+│                                                                                 │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 3.2 Unity Catalog Structure
+
+### Catalog Strategy (Environment-Based)
+
+```
+production          ← Live data, governed access
+├── risk_bronze
+├── risk_silver
+├── risk_gold
+├── lending_bronze
+├── lending_silver
+├── lending_gold
+├── customer_bronze
+├── ...
+├── _governance     ← Audit, MNPI registry, access logs
+└── _monitoring     ← Pipeline metrics, DQ scores, SLA tracking
+
+staging             ← Pre-production validation
+├── (mirrors production schema structure)
+
+development         ← Developer sandboxes
+├── (mirrors production schema structure)
+```
+
+### Naming Conventions
+
+| Object | Convention | Example |
+|--------|-----------|---------|
+| Catalog | `{environment}` | production, staging, development |
+| Schema | `{domain}_{layer}` | risk_bronze, lending_silver |
+| Table | `{entity}` (snake_case) | trade_events, loan_applications |
+| View | `v_{purpose}` | v_active_trades, v_risk_summary |
+| Function | `{action}_{target}` | mask_ssn, filter_mnpi |
+| Volume | `{domain}_{purpose}` | risk_checkpoints, lending_raw_files |
+
+### Bootstrap SQL (Auto-Generated)
+
+```sql
+-- Generated by: aws2lakehouse.bootstrap.Bootstrap
+
+-- Catalogs
+CREATE CATALOG IF NOT EXISTS production;
+CREATE CATALOG IF NOT EXISTS staging;
+CREATE CATALOG IF NOT EXISTS development;
+
+-- Domain schemas (per catalog)
+CREATE SCHEMA IF NOT EXISTS production.risk_bronze;
+CREATE SCHEMA IF NOT EXISTS production.risk_silver;
+CREATE SCHEMA IF NOT EXISTS production.risk_gold;
+CREATE SCHEMA IF NOT EXISTS production.lending_bronze;
+-- ... (auto-generated for all domains)
+
+-- Governance schema
+CREATE SCHEMA IF NOT EXISTS production._governance;
+CREATE TABLE IF NOT EXISTS production._governance.audit_log (
+    event_time TIMESTAMP, principal STRING, action STRING,
+    object_type STRING, object_name STRING, details STRING
+);
+CREATE TABLE IF NOT EXISTS production._governance.mnpi_registry (
+    table_name STRING, column_name STRING, classification STRING,
+    mask_function STRING, authorized_groups ARRAY<STRING>,
+    registered_at TIMESTAMP, registered_by STRING
+);
+
+-- Monitoring schema
+CREATE SCHEMA IF NOT EXISTS production._monitoring;
+CREATE TABLE IF NOT EXISTS production._monitoring.pipeline_runs (...);
+CREATE TABLE IF NOT EXISTS production._monitoring.freshness_metrics (...);
+CREATE TABLE IF NOT EXISTS production._monitoring.volume_metrics (...);
+CREATE TABLE IF NOT EXISTS production._monitoring.dq_scores (...);
+```
+
+---
+
+## 3.3 MNPI Controls (Financial Services)
+
+### What is MNPI?
+
+Material Non-Public Information — data that could influence investment decisions if disclosed. In financial services, this includes:
+- Trade positions, P&L, notional amounts
+- Pending M&A activity
+- Earnings before public release
+- Client trading patterns
+
+### Column Masking
+
+```sql
+-- Create masking function
+CREATE OR REPLACE FUNCTION production.risk_bronze.mask_notional_amount(val DECIMAL)
+RETURNS DECIMAL
+RETURN CASE 
+    WHEN is_account_group_member('risk_trading_desk') THEN val
+    WHEN is_account_group_member('risk_management') THEN val
+    ELSE NULL  -- Complete redaction for unauthorized users
+END;
+
+-- Apply mask to column
+ALTER TABLE production.risk_bronze.trade_events
+ALTER COLUMN notional_amount SET MASK production.risk_bronze.mask_notional_amount;
+
+-- Tag for audit
+ALTER TABLE production.risk_bronze.trade_events
+ALTER COLUMN notional_amount SET TAGS ('mnpi' = 'true', 'sensitivity' = 'high');
+```
+
+### Row-Level Filtering (Embargo)
+
+```sql
+-- Only show trades after T+1 embargo period
+CREATE OR REPLACE FUNCTION production.risk_bronze.embargo_filter(trade_date DATE)
+RETURNS BOOLEAN
+RETURN CASE
+    WHEN is_account_group_member('risk_trading_desk') THEN TRUE  -- Real-time access
+    WHEN is_account_group_member('compliance') THEN TRUE         -- Full access
+    ELSE trade_date < CURRENT_DATE - INTERVAL 1 DAY             -- T+1 embargo
+END;
+
+ALTER TABLE production.risk_bronze.trade_events
+SET ROW FILTER production.risk_bronze.embargo_filter ON (trade_date);
+```
+
+### Dynamic Views (Multi-Level RBAC)
+
+```sql
+CREATE OR REPLACE VIEW production.risk_silver.v_trades_governed AS
+SELECT
+    trade_id,
+    trade_date,
+    instrument,
+    CASE 
+        WHEN is_account_group_member('risk_trading_desk') THEN counterparty
+        ELSE SHA2(counterparty, 256)
+    END AS counterparty,
+    CASE 
+        WHEN is_account_group_member('risk_management') THEN notional_amount
+        WHEN is_account_group_member('risk_analytics') THEN 
+            ROUND(notional_amount / 1000000, 1) * 1000000  -- Round to nearest million
+        ELSE NULL
+    END AS notional_amount,
+    CASE
+        WHEN is_account_group_member('risk_trading_desk') THEN pnl
+        ELSE NULL
+    END AS pnl
+FROM production.risk_silver.trade_events;
+```
+
+---
+
+## 3.4 Data Quality Framework
+
+### SDP Expectations (Declarative)
+
+```sql
+-- In Spark Declarative Pipeline definition
+CREATE OR REFRESH STREAMING TABLE trade_events_validated (
+    CONSTRAINT valid_trade_id EXPECT (trade_id IS NOT NULL) ON VIOLATION DROP ROW,
+    CONSTRAINT valid_amount EXPECT (notional_amount > 0) ON VIOLATION FAIL UPDATE,
+    CONSTRAINT valid_date EXPECT (trade_date <= CURRENT_DATE) ON VIOLATION DROP ROW,
+    CONSTRAINT no_duplicates EXPECT (row_number = 1) ON VIOLATION DROP ROW
+) AS
+SELECT *, ROW_NUMBER() OVER (PARTITION BY trade_id ORDER BY _ingested_at DESC) as row_number
+FROM STREAM(LIVE.trade_events_raw);
+```
+
+### Custom Quality Checks (Notebook)
+
+```python
+# In notebook: assert-based DQ with metrics logging
+dq_results = []
+
+# Check 1: Completeness
+null_count = df.filter(F.col("trade_id").isNull()).count()
+total = df.count()
+completeness = (total - null_count) / total
+dq_results.append(("completeness_trade_id", completeness, 0.999))
+assert completeness >= 0.999, f"Completeness check failed: {completeness:.4f}"
+
+# Check 2: Freshness
+max_ts = df.agg(F.max("event_timestamp")).collect()[0][0]
+staleness_minutes = (datetime.utcnow() - max_ts).total_seconds() / 60
+dq_results.append(("freshness_minutes", staleness_minutes, 10))
+assert staleness_minutes <= 10, f"Data is stale: {staleness_minutes:.0f} min"
+
+# Check 3: Volume anomaly (vs 7-day rolling avg)
+today_count = df.count()
+avg_7d = spark.sql("SELECT AVG(row_count) FROM monitoring.volume_history WHERE ...").collect()[0][0]
+volume_ratio = today_count / avg_7d
+dq_results.append(("volume_ratio", volume_ratio, 0.5))  # Alert if <50% of normal
+assert volume_ratio > 0.5, f"Volume anomaly: {volume_ratio:.2f}x normal"
+```
+
+---
+
+## 3.5 Observability Framework
+
+### Monitoring Layers
+
+| Layer | What | Tool | Alert Threshold |
+|-------|------|------|-----------------|
+| Pipeline Health | Success/failure, duration | System tables | Any failure |
+| Data Freshness | Staleness vs SLA | Custom SQL view | SLA breach |
+| Data Volume | Row count anomalies | Custom SQL view | ±50% of 7-day avg |
+| Data Quality | DQ check pass rates | Expectations + custom | <99% pass |
+| Compute Cost | DBU consumption | System tables | >120% of baseline |
+| Dependency Status | Upstream completion | Job API | Any upstream failure |
+
+### System Tables for Monitoring
+
+```sql
+-- Pipeline run history (auto-populated by Databricks)
+SELECT * FROM system.lakeflow.job_run_timeline
+WHERE job_name LIKE '%risk%' AND start_time > CURRENT_DATE - 7;
+
+-- Query performance
+SELECT * FROM system.query.history
+WHERE statement_type = 'SELECT' AND duration_ms > 60000;
+
+-- Audit trail
+SELECT * FROM system.access.audit
+WHERE action_name = 'getTable' AND request_params.full_name_arg LIKE '%mnpi%';
+```
+
+---
+
+## 3.6 Business Continuity & Disaster Recovery
+
+### RPO/RTO Targets
+
+| Tier | RPO | RTO | Strategy | Example |
+|------|-----|-----|----------|---------|
+| Tier 1 (Critical) | 5 min | 15 min | Active-active streaming | trade_events |
+| Tier 2 (High) | 1 hour | 1 hour | Cross-region Delta replication | daily_risk |
+| Tier 3 (Standard) | 24 hours | 4 hours | Backup + re-run | customer_360 |
+
+### DR Strategy
+
+1. **Storage**: Delta Lake on cloud storage (inherently durable, 99.999999999% durability)
+2. **Metadata**: Unity Catalog metastore replicated cross-region
+3. **Checkpoints**: Streaming checkpoints in durable storage (Volumes)
+4. **Config**: All pipeline config in version control (DABs repo)
+5. **Recovery**: `databricks bundle deploy --target dr-region` → redeploy entire platform
+6. **Data replay**: Kafka retention (7 days) + S3 versioning enables full replay
+
+---
+
+## Deliverables Checklist
+
+- [ ] Lakehouse architecture diagram approved
+- [ ] Unity Catalog structure defined (catalogs, schemas, naming)
+- [ ] Bootstrap SQL generated and executed
+- [ ] MNPI controls implemented (column masks, row filters)
+- [ ] Data quality framework defined (expectations + custom checks)
+- [ ] Monitoring dashboard deployed (7 SQL views)
+- [ ] DR strategy documented and tested
+- [ ] Access control matrix completed (groups → schemas → permissions)

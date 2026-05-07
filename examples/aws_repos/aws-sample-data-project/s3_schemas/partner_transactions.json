@@ -1,0 +1,36 @@
+{
+  "source": "partner_transactions",
+  "format": "json",
+  "multiline": true,
+  "landing_path": "s3://acme-vendor-drops/partner_data/",
+  "columns": [
+    {
+      "name": "transaction_id",
+      "type": "string",
+      "nullable": false
+    },
+    {
+      "name": "partner_id",
+      "type": "string",
+      "nullable": false
+    },
+    {
+      "name": "amount",
+      "type": "decimal(15,2)"
+    },
+    {
+      "name": "transaction_type",
+      "type": "string"
+    },
+    {
+      "name": "timestamp",
+      "type": "timestamp",
+      "format": "yyyy-MM-dd'T'HH:mm:ss.SSSZ"
+    },
+    {
+      "name": "metadata",
+      "type": "struct",
+      "nested": true
+    }
+  ]
+}

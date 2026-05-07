@@ -1,0 +1,39 @@
+bundle:
+  name: acme-capital-data-platform
+
+workspace:
+  host: ${var.workspace_host}
+
+variables:
+  workspace_host:
+    description: Databricks workspace URL
+
+targets:
+  dev:
+    mode: development
+    default: true
+    variables:
+      workspace_host: ""
+
+  staging:
+    mode: development
+    variables:
+      workspace_host: ""
+
+  production:
+    mode: production
+    variables:
+      workspace_host: ""
+    run_as:
+      service_principal_name: acme-capital-data-platform-sp
+
+include:
+    - resources/jobs/feature_store_builder.yml
+    - resources/jobs/customer_dimension.yml
+    - resources/jobs/order_events_processing.yml
+    - resources/jobs/financial_reconciliation.yml
+    - resources/jobs/vendor_data_ingestion.yml
+    - resources/jobs/market_data_ingest_job.yml
+    - resources/jobs/position_snapshot_job.yml
+    - resources/jobs/risk_aggregation_job.yml
+    - resources/jobs/nav_calculation_job.yml

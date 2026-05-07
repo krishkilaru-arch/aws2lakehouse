@@ -1,0 +1,143 @@
+
+{
+  "TableName": "pipeline_config",
+  "Items": [
+    {
+      "source_type": "vendor",
+      "source_name": "bloomberg",
+      "file_format": "csv",
+      "delimiter": "|",
+      "schedule": "event_driven",
+      "sla_minutes": 15,
+      "classification": "mnpi",
+      "owner": "market-data-team@acme.com",
+      "validation_rules": {
+        "format": "csv",
+        "required_columns": ["figi", "pricing_date", "close_price", "volume"],
+        "min_rows": 5000,
+        "max_size_mb": 500
+      },
+      "silver_transforms": [
+        {"type": "cast", "columns": {"close_price": "decimal(18,6)", "volume": "bigint"}},
+        {"type": "derive", "expressions": {"price_change_pct": "(close_price - open_price) / open_price * 100"}},
+        {"type": "dedup", "key_columns": ["figi", "pricing_date"], "order_by": "_ingested_at"},
+        {"type": "filter", "condition": "close_price > 0 AND volume > 0"}
+      ],
+      "silver_partition_by": ["pricing_date"],
+      "dq_rules": [
+        {"name": "no_null_prices", "sql": "SELECT COUNT(*) FROM silver.bloomberg WHERE close_price IS NULL", "threshold": 0, "severity": "critical"},
+        {"name": "price_range", "sql": "SELECT COUNT(*) FROM silver.bloomberg WHERE close_price < 0 OR close_price > 100000", "threshold": 10, "severity": "warning"},
+        {"name": "freshness", "sql": "SELECT DATEDIFF(hour, MAX(pricing_date), CURRENT_DATE) FROM silver.bloomberg", "threshold": 24, "severity": "critical"}
+      ],
+      "gold_aggregations": [
+        {
+          "name": "daily_market_summary",
+          "group_by": ["pricing_date", "sector"],
+          "metrics": [
+            {"column": "close_price", "function": "avg", "alias": "avg_price"},
+            {"column": "volume", "function": "sum", "alias": "total_volume"},
+            {"column": "figi", "function": "count_distinct", "alias": "instrument_count"},
+            {"column": "price_change_pct", "function": "avg", "alias": "avg_return"}
+          ]
+        }
+      ],
+      "enable_gold_layer": true,
+      "enable_dq_gate": true,
+      "enable_notifications": true
+    },
+    {
+      "source_type": "vendor",
+      "source_name": "refinitiv",
+      "file_format": "csv",
+      "delimiter": ",",
+      "schedule": "event_driven",
+      "sla_minutes": 30,
+      "classification": "mnpi",
+      "owner": "market-data-team@acme.com",
+      "validation_rules": {
+        "format": "csv",
+        "required_columns": ["ric_code", "trade_date", "last_price", "bid", "ask"],
+        "min_rows": 10000
+      },
+      "silver_transforms": [
+        {"type": "cast", "columns": {"last_price": "decimal(18,6)", "bid": "decimal(18,6)", "ask": "decimal(18,6)"}},
+        {"type": "derive", "expressions": {"spread": "ask - bid", "mid_price": "(bid + ask) / 2"}},
+        {"type": "dedup", "key_columns": ["ric_code", "trade_date"], "order_by": "_ingested_at"}
+      ],
+      "dq_rules": [
+        {"name": "valid_spread", "sql": "SELECT COUNT(*) FROM silver.refinitiv WHERE spread < 0", "threshold": 0, "severity": "critical"}
+      ],
+      "gold_aggregations": [
+        {
+          "name": "spread_analysis",
+          "group_by": ["trade_date", "asset_class"],
+          "metrics": [
+            {"column": "spread", "function": "avg", "alias": "avg_spread"},
+            {"column": "spread", "function": "max", "alias": "max_spread"},
+            {"column": "ric_code", "function": "count_distinct", "alias": "instrument_count"}
+          ]
+        }
+      ]
+    },
+    {
+      "source_type": "internal",
+      "source_name": "payroll",
+      "file_format": "csv",
+      "delimiter": ",",
+      "schedule": "event_driven",
+      "sla_minutes": 60,
+      "classification": "confidential",
+      "owner": "hr-systems@acme.com",
+      "validation_rules": {
+        "format": "csv",
+        "required_columns": ["employee_id", "pay_date", "gross_pay", "net_pay", "department"],
+        "min_rows": 500
+      },
+      "silver_transforms": [
+        {"type": "cast", "columns": {"gross_pay": "decimal(12,2)", "net_pay": "decimal(12,2)"}},
+        {"type": "mask", "columns": ["ssn", "bank_account"], "strategy": "hash"},
+        {"type": "dedup", "key_columns": ["employee_id", "pay_date"], "order_by": "_ingested_at"}
+      ],
+      "silver_partition_by": ["pay_date"],
+      "dq_rules": [
+        {"name": "valid_pay", "sql": "SELECT COUNT(*) FROM silver.payroll WHERE net_pay > gross_pay", "threshold": 0, "severity": "critical"},
+        {"name": "no_negatives", "sql": "SELECT COUNT(*) FROM silver.payroll WHERE gross_pay < 0", "threshold": 0, "severity": "critical"}
+      ],
+      "gold_aggregations": [
+        {
+          "name": "department_payroll_summary",
+          "group_by": ["pay_date", "department"],
+          "metrics": [
+            {"column": "gross_pay", "function": "sum", "alias": "total_gross"},
+            {"column": "employee_id", "function": "count", "alias": "headcount"},
+            {"column": "gross_pay", "function": "avg", "alias": "avg_compensation"}
+          ]
+        }
+      ]
+    },
+    {
+      "source_type": "partner",
+      "source_name": "trade_settlements",
+      "file_format": "json",
+      "multi_line": true,
+      "schedule": "event_driven",
+      "sla_minutes": 10,
+      "classification": "mnpi",
+      "owner": "ops-team@acme.com",
+      "validation_rules": {
+        "format": "json",
+        "required_columns": ["trade_id", "settlement_date", "counterparty", "amount"],
+        "min_rows": 100
+      },
+      "silver_transforms": [
+        {"type": "cast", "columns": {"amount": "decimal(18,2)", "settlement_date": "date"}},
+        {"type": "derive", "expressions": {"is_large_trade": "CASE WHEN amount > 1000000 THEN true ELSE false END"}},
+        {"type": "dedup", "key_columns": ["trade_id"], "order_by": "settlement_date"},
+        {"type": "mask", "columns": ["counterparty_account"], "strategy": "redact"}
+      ],
+      "dq_rules": [
+        {"name": "no_future_settlements", "sql": "SELECT COUNT(*) FROM silver.trade_settlements WHERE settlement_date > CURRENT_DATE + 5", "threshold": 0, "severity": "warning"}
+      ]
+    }
+  ]
+}

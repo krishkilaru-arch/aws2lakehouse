@@ -1,0 +1,72 @@
+
+{
+  "DashboardName": "ServerlessDataPlatform",
+  "Widgets": [
+    {
+      "type": "metric",
+      "title": "Pipeline Executions (Success/Failure)",
+      "metrics": [
+        ["AWS/States", "ExecutionsSucceeded", "StateMachineArn", "arn:aws:states:..."],
+        ["AWS/States", "ExecutionsFailed", "StateMachineArn", "arn:aws:states:..."]
+      ],
+      "period": 3600
+    },
+    {
+      "type": "metric",
+      "title": "Lambda Invocations",
+      "metrics": [
+        ["AWS/Lambda", "Invocations", "FunctionName", "file_arrival_trigger"],
+        ["AWS/Lambda", "Invocations", "FunctionName", "data_validator"],
+        ["AWS/Lambda", "Invocations", "FunctionName", "dq_checker"],
+        ["AWS/Lambda", "Invocations", "FunctionName", "notification_handler"]
+      ]
+    },
+    {
+      "type": "metric",
+      "title": "Glue Job Duration",
+      "metrics": [
+        ["AWS/Glue", "glue.driver.aggregate.elapsedTime", "JobName", "bronze_ingestion"],
+        ["AWS/Glue", "glue.driver.aggregate.elapsedTime", "JobName", "silver_transformation"],
+        ["AWS/Glue", "glue.driver.aggregate.elapsedTime", "JobName", "gold_aggregation"]
+      ]
+    },
+    {
+      "type": "metric",
+      "title": "S3 File Arrivals",
+      "metrics": [
+        ["AWS/S3", "NumberOfObjects", "BucketName", "acme-inbound-files"]
+      ]
+    }
+  ],
+  "Alarms": [
+    {
+      "AlarmName": "PipelineFailureRate",
+      "MetricName": "ExecutionsFailed",
+      "Namespace": "AWS/States",
+      "Threshold": 3,
+      "Period": 3600,
+      "EvaluationPeriods": 1,
+      "ComparisonOperator": "GreaterThanThreshold",
+      "ActionsEnabled": true,
+      "AlarmActions": ["arn:aws:sns:us-east-1:123456789:data-platform-alerts"]
+    },
+    {
+      "AlarmName": "LambdaErrorRate",
+      "MetricName": "Errors",
+      "Namespace": "AWS/Lambda",
+      "Threshold": 5,
+      "Period": 300,
+      "ComparisonOperator": "GreaterThanThreshold",
+      "AlarmActions": ["arn:aws:sns:us-east-1:123456789:data-platform-alerts"]
+    },
+    {
+      "AlarmName": "GlueJobTimeout",
+      "MetricName": "glue.driver.aggregate.elapsedTime",
+      "Namespace": "AWS/Glue",
+      "Threshold": 1800000,
+      "Period": 300,
+      "ComparisonOperator": "GreaterThanThreshold",
+      "AlarmActions": ["arn:aws:sns:us-east-1:123456789:data-platform-alerts"]
+    }
+  ]
+}

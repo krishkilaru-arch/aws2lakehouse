@@ -1,0 +1,43 @@
+
+{
+  "environment": "production",
+  "region": "us-east-1",
+  "infrastructure": {
+    "emr_cluster": {
+      "master": "m5.2xlarge",
+      "workers": "r5.4xlarge",
+      "worker_count": 6,
+      "emr_version": "emr-6.12.0"
+    },
+    "redshift": {
+      "cluster": "ecomco-analytics",
+      "node_type": "ra3.4xlarge",
+      "nodes": 4,
+      "schemas": ["staging", "analytics", "reporting"]
+    },
+    "airflow": {
+      "environment": "ecomco-mwaa-prod",
+      "version": "2.7.2",
+      "dags_s3": "s3://ecomco-airflow/dags/"
+    }
+  },
+  "data_sources": {
+    "orders_postgres": {"host": "orders-rds.internal", "port": 5432, "db": "ecommerce"},
+    "inventory_mysql": {"host": "inventory-rds.internal", "port": 3306, "db": "warehouse_mgmt"},
+    "salesforce": {"instance": "acmeco.my.salesforce.com"},
+    "carrier_apis": ["fedex", "ups", "dhl"]
+  },
+  "costs_monthly_usd": {
+    "emr_clusters": 18500,
+    "redshift": 12000,
+    "mwaa_airflow": 3200,
+    "s3_storage": 2100,
+    "data_transfer": 1500,
+    "total": 37300
+  },
+  "team": {
+    "data_engineers": 5,
+    "analytics_engineers": 3,
+    "data_analysts": 8
+  }
+}

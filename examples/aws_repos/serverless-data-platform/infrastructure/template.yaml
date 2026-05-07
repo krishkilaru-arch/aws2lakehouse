@@ -1,0 +1,188 @@
+
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Serverless Data Platform — Event-driven Bronze/Silver/Gold
+
+Globals:
+  Function:
+    Runtime: python3.11
+    Timeout: 300
+    MemorySize: 512
+    Environment:
+      Variables:
+        CONFIG_TABLE: !Ref PipelineConfigTable
+        ENVIRONMENT: !Ref Environment
+
+Parameters:
+  Environment:
+    Type: String
+    Default: production
+    AllowedValues: [development, staging, production]
+
+Resources:
+  # ─── S3 Bucket (inbound files) ───
+  InboundBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "acme-inbound-files-${Environment}"
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Event: "s3:ObjectCreated:*"
+            Function: !GetAtt FileArrivalTrigger.Arn
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: "vendor/"
+          - Event: "s3:ObjectCreated:*"
+            Function: !GetAtt FileArrivalTrigger.Arn
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: "internal/"
+          - Event: "s3:ObjectCreated:*"
+            Function: !GetAtt FileArrivalTrigger.Arn
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: "partner/"
+
+  # ─── Lambda Functions ───
+  FileArrivalTrigger:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "file_arrival_trigger_${Environment}"
+      Handler: handler.handler
+      CodeUri: ../lambda/file_arrival_trigger/
+      Environment:
+        Variables:
+          STATE_MACHINE_ARN: !Ref DataPipelineStateMachine
+      Policies:
+        - StepFunctionsExecutionPolicy:
+            StateMachineName: !GetAtt DataPipelineStateMachine.Name
+        - DynamoDBReadPolicy:
+            TableName: !Ref PipelineConfigTable
+
+  DataValidator:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "data_validator_${Environment}"
+      Handler: handler.handler
+      CodeUri: ../lambda/data_validator/
+      MemorySize: 1024
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Sub "acme-inbound-files-${Environment}"
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PipelineMetricsTable
+
+  DQChecker:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "dq_checker_${Environment}"
+      Handler: handler.handler
+      CodeUri: ../lambda/dq_checker/
+      Timeout: 600
+      Environment:
+        Variables:
+          ALERT_TOPIC_ARN: !Ref AlertTopic
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: ["athena:*"]
+              Resource: "*"
+        - SNSPublishMessagePolicy:
+            TopicName: !GetAtt AlertTopic.TopicName
+
+  NotificationHandler:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "notification_handler_${Environment}"
+      Handler: handler.handler
+      CodeUri: ../lambda/notification_handler/
+      Environment:
+        Variables:
+          SLACK_WEBHOOK_URL: "{{resolve:ssm:/acme/slack-webhook:1}}"
+          NOTIFICATION_TOPIC_ARN: !Ref AlertTopic
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ExecutionLogTable
+        - SNSPublishMessagePolicy:
+            TopicName: !GetAtt AlertTopic.TopicName
+
+  # ─── Step Functions ───
+  DataPipelineStateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      StateMachineName: !Sub "data-pipeline-${Environment}"
+      DefinitionUri: ../step_functions/data_pipeline.json
+      RoleArn: !GetAtt StepFunctionsRole.Arn
+
+  # ─── DynamoDB Tables ───
+  PipelineConfigTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: pipeline_config
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - {AttributeName: source_type, AttributeType: S}
+        - {AttributeName: source_name, AttributeType: S}
+      KeySchema:
+        - {AttributeName: source_type, KeyType: HASH}
+        - {AttributeName: source_name, KeyType: RANGE}
+
+  PipelineMetricsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: pipeline_metrics
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - {AttributeName: pipeline_name, AttributeType: S}
+        - {AttributeName: timestamp, AttributeType: S}
+      KeySchema:
+        - {AttributeName: pipeline_name, KeyType: HASH}
+        - {AttributeName: timestamp, KeyType: RANGE}
+      TimeToLiveSpecification: {AttributeName: ttl, Enabled: true}
+
+  ExecutionLogTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: pipeline_execution_log
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - {AttributeName: pipeline_name, AttributeType: S}
+        - {AttributeName: execution_time, AttributeType: S}
+      KeySchema:
+        - {AttributeName: pipeline_name, KeyType: HASH}
+        - {AttributeName: execution_time, KeyType: RANGE}
+
+  # ─── SNS Topic ───
+  AlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "data-platform-alerts-${Environment}"
+
+  # ─── IAM ───
+  StepFunctionsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal: {Service: states.amazonaws.com}
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: InvokeGlueAndLambda
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action: ["lambda:InvokeFunction", "glue:StartJobRun", "glue:GetJobRun"]
+                Resource: "*"
+
+Outputs:
+  StateMachineArn:
+    Value: !Ref DataPipelineStateMachine
+  InboundBucketName:
+    Value: !Ref InboundBucket

@@ -1,0 +1,225 @@
+{
+  "Comment": "MedStream Ingestion Pipeline \u2014 S3 file \u2192 Validate \u2192 Enrich \u2192 Bronze \u2192 Silver \u2192 Gold",
+  "StartAt": "CheckDuplicate",
+  "States": {
+    "CheckDuplicate": {
+      "Type": "Task",
+      "Resource": "${MetadataManagerFunctionArn}",
+      "Parameters": {
+        "action": "check_duplicate",
+        "pipeline_id.$": "$.source_system",
+        "source_key.$": "$.key"
+      },
+      "ResultPath": "$.duplicate_check",
+      "Next": "IsDuplicate"
+    },
+    "IsDuplicate": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.duplicate_check.is_duplicate",
+          "BooleanEquals": true,
+          "Next": "SkipDuplicate"
+        }
+      ],
+      "Default": "ValidateFile"
+    },
+    "SkipDuplicate": {
+      "Type": "Pass",
+      "Result": {
+        "status": "SKIPPED",
+        "reason": "Duplicate file"
+      },
+      "End": true
+    },
+    "ValidateFile": {
+      "Type": "Task",
+      "Resource": "${ValidatorFunctionArn}",
+      "ResultPath": "$",
+      "Next": "IsValid",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "HandleValidationError"
+        }
+      ]
+    },
+    "IsValid": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.is_valid",
+          "BooleanEquals": false,
+          "Next": "HandleValidationError"
+        }
+      ],
+      "Default": "EnrichData"
+    },
+    "HandleValidationError": {
+      "Type": "Task",
+      "Resource": "${NotificationFunctionArn}",
+      "Parameters": {
+        "run_id.$": "$.run_id",
+        "source_system.$": "$.source_system",
+        "validation.$": "$.validation",
+        "is_valid": false,
+        "alert_type": "VALIDATION_FAILURE"
+      },
+      "Next": "RecordFailure"
+    },
+    "RecordFailure": {
+      "Type": "Task",
+      "Resource": "${MetadataManagerFunctionArn}",
+      "Parameters": {
+        "action": "record_run",
+        "pipeline_id.$": "$.source_system",
+        "run_id.$": "$.run_id",
+        "status": "FAILED",
+        "errors.$": "$.validation.errors"
+      },
+      "End": true
+    },
+    "EnrichData": {
+      "Type": "Task",
+      "Resource": "${EnrichmentFunctionArn}",
+      "ResultPath": "$",
+      "Next": "CheckAlerts",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException"
+          ],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "HandleValidationError"
+        }
+      ]
+    },
+    "CheckAlerts": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.enrichment.alerts_triggered",
+          "NumericGreaterThan": 0,
+          "Next": "SendCriticalAlert"
+        }
+      ],
+      "Default": "RunBronzeToSilver"
+    },
+    "SendCriticalAlert": {
+      "Type": "Task",
+      "Resource": "${NotificationFunctionArn}",
+      "ResultPath": "$.alert_result",
+      "Next": "RunBronzeToSilver"
+    },
+    "RunBronzeToSilver": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::glue:startJobRun.sync",
+      "Parameters": {
+        "JobName": "${GlueJobName}",
+        "Arguments": {
+          "--source_system.$": "$.source_system",
+          "--file_date.$": "$.file_date",
+          "--input_path.$": "$.enrichment.output_key",
+          "--run_id.$": "$.run_id"
+        }
+      },
+      "ResultPath": "$.glue_result",
+      "Next": "RunSilverToGold",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Glue.ConcurrentRunsExceededException"
+          ],
+          "IntervalSeconds": 60,
+          "MaxAttempts": 3
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "HandleGlueError"
+        }
+      ]
+    },
+    "HandleGlueError": {
+      "Type": "Task",
+      "Resource": "${NotificationFunctionArn}",
+      "Parameters": {
+        "alert_type": "GLUE_FAILURE",
+        "run_id.$": "$.run_id",
+        "source_system.$": "$.source_system"
+      },
+      "End": true
+    },
+    "RunSilverToGold": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::glue:startJobRun.sync",
+      "Parameters": {
+        "JobName": "medstream-silver-to-gold-prod",
+        "Arguments": {
+          "--source_system.$": "$.source_system",
+          "--file_date.$": "$.file_date"
+        }
+      },
+      "ResultPath": "$.gold_result",
+      "Next": "UpdateWatermark",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "HandleGlueError"
+        }
+      ]
+    },
+    "UpdateWatermark": {
+      "Type": "Task",
+      "Resource": "${MetadataManagerFunctionArn}",
+      "Parameters": {
+        "action": "update_watermark",
+        "pipeline_id.$": "$.source_system",
+        "watermark_value.$": "$.file_date"
+      },
+      "ResultPath": "$.watermark_result",
+      "Next": "RecordSuccess"
+    },
+    "RecordSuccess": {
+      "Type": "Task",
+      "Resource": "${MetadataManagerFunctionArn}",
+      "Parameters": {
+        "action": "record_run",
+        "pipeline_id.$": "$.source_system",
+        "run_id.$": "$.run_id",
+        "status": "COMPLETED",
+        "records_processed.$": "$.enrichment.records_enriched"
+      },
+      "Next": "SendSuccessNotification"
+    },
+    "SendSuccessNotification": {
+      "Type": "Task",
+      "Resource": "${NotificationFunctionArn}",
+      "End": true
+    }
+  }
+}

@@ -1,0 +1,19 @@
+resources:
+  jobs:
+    customer_dimension:
+      name: "[prod] finance/customer_dimension"
+      description: "Migrated from AWS: jdbc → finance_bronze"
+      tasks:
+        - task_key: customer_dimension
+          notebook_task:
+            notebook_path: pipelines/finance/customer_dimension
+            base_parameters:
+              CATALOG: "acme_prod"
+              SCHEMA: "finance_bronze"
+              TABLE: "customer_dimension"
+          max_retries: 2
+          timeout_seconds: 3600
+      tags:
+        domain: "finance"
+        layer: "bronze"
+        classification: "confidential"

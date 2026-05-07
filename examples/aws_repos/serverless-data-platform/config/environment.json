@@ -1,0 +1,35 @@
+
+{
+  "platform": "serverless-data-platform",
+  "environment": "production",
+  "region": "us-east-1",
+  "architecture": "fully_serverless",
+  "components": {
+    "trigger": "S3 Event Notification → Lambda",
+    "orchestration": "Step Functions",
+    "compute": "Glue Serverless (no provisioned capacity)",
+    "config_store": "DynamoDB (pipeline_config table)",
+    "state_store": "DynamoDB (pipeline_execution_log)",
+    "monitoring": "CloudWatch Dashboards + Alarms",
+    "alerting": "SNS → Slack + PagerDuty",
+    "quality": "Lambda DQ Checker + Athena queries"
+  },
+  "pipelines": {
+    "bloomberg": {"type": "vendor", "sla": "15min", "classification": "mnpi"},
+    "refinitiv": {"type": "vendor", "sla": "30min", "classification": "mnpi"},
+    "payroll": {"type": "internal", "sla": "60min", "classification": "confidential"},
+    "trade_settlements": {"type": "partner", "sla": "10min", "classification": "mnpi"}
+  },
+  "costs_monthly_usd": {
+    "lambda": 45,
+    "step_functions": 120,
+    "glue_serverless": 3200,
+    "dynamodb": 85,
+    "s3": 450,
+    "cloudwatch": 95,
+    "sns": 5,
+    "athena": 180,
+    "total": 4180
+  },
+  "team": {"data_engineers": 2, "note": "Only 2 engineers needed for fully serverless"}
+}

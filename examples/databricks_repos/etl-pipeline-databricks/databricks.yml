@@ -1,0 +1,11 @@
+bundle:
+  name: shopmax-data-platform
+
+targets:
+  dev: {mode: development, default: true}
+  production:
+    mode: production
+    run_as: {service_principal_name: shopmax-data-sp}
+
+include:
+  - resources/jobs/*.yml

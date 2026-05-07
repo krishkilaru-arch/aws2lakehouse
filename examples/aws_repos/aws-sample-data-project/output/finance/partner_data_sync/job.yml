@@ -1,0 +1,23 @@
+resources:
+  jobs:
+    partner_data_sync:
+      name: "[prod] finance/partner_data_sync"
+      description: "Migrated from AWS: auto_loader → finance_bronze"
+  schedule:
+    quartz_cron_expression: "0 0 */6 * * ? *"
+    timezone_id: "America/New_York"
+    pause_status: UNPAUSED
+      tasks:
+        - task_key: partner_data_sync
+          notebook_task:
+            notebook_path: pipelines/finance/partner_data_sync
+            base_parameters:
+              CATALOG: "production"
+              SCHEMA: "finance_bronze"
+              TABLE: "partner_data_sync"
+          max_retries: 2
+          timeout_seconds: 3600
+      tags:
+        domain: "finance"
+        layer: "bronze"
+        classification: "internal"

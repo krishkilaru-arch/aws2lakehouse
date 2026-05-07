@@ -1,0 +1,44 @@
+resources:
+  jobs:
+    daily_orders_pipeline:
+      name: "[prod] orders/daily-pipeline"
+      description: "Replaces Airflow daily_orders_pipeline DAG"
+      schedule:
+        quartz_cron_expression: "0 0 2 * * ? *"
+        timezone_id: "UTC"
+      
+      tasks:
+        - task_key: extract_orders
+          notebook_task:
+            notebook_path: src/pipelines/orders/bronze/extract_orders
+            base_parameters: {CATALOG: "production"}
+        
+        - task_key: extract_products
+          notebook_task:
+            notebook_path: src/pipelines/orders/bronze/extract_products
+            base_parameters: {CATALOG: "production"}
+        
+        - task_key: extract_customers
+          notebook_task:
+            notebook_path: src/pipelines/orders/bronze/extract_customers
+            base_parameters: {CATALOG: "production"}
+        
+        - task_key: enrich_orders
+          depends_on:
+            - {task_key: extract_orders}
+            - {task_key: extract_products}
+            - {task_key: extract_customers}
+          notebook_task:
+            notebook_path: src/pipelines/orders/silver/enrich_orders
+            base_parameters: {CATALOG: "production"}
+        
+        - task_key: revenue_metrics
+          depends_on: [{task_key: enrich_orders}]
+          notebook_task:
+            notebook_path: src/pipelines/orders/gold/revenue_metrics
+            base_parameters: {CATALOG: "production"}
+      
+      tags:
+        domain: orders
+        team: data-platform
+        replaces: airflow/daily_orders_pipeline

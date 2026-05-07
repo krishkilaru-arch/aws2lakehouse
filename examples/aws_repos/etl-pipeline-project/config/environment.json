@@ -1,0 +1,82 @@
+{
+  "project": "shopmax-analytics",
+  "team": "data-platform",
+  "team_size": 8,
+  "sources": {
+    "orders_db": {
+      "type": "postgresql",
+      "host": "orders-replica.xyz.rds.amazonaws.com",
+      "tables": 12
+    },
+    "customers_db": {
+      "type": "postgresql",
+      "host": "customers.xyz.rds.amazonaws.com",
+      "tables": 8
+    },
+    "products_api": {
+      "type": "rest_api",
+      "url": "https://api.shopmax.com/v3",
+      "endpoints": 6
+    },
+    "kafka": {
+      "type": "msk",
+      "brokers": 3,
+      "topics": [
+        "clickstream-events",
+        "purchase-events",
+        "cart-events"
+      ]
+    },
+    "vendor_files": {
+      "type": "s3",
+      "bucket": "shopmax-vendor-drops",
+      "formats": [
+        "csv",
+        "json",
+        "parquet"
+      ]
+    }
+  },
+  "infrastructure": {
+    "emr_clusters": [
+      {
+        "name": "daily-etl",
+        "type": "transient",
+        "instance_type": "r5.4xlarge",
+        "count": 8
+      },
+      {
+        "name": "streaming",
+        "type": "long-running",
+        "instance_type": "m5.2xlarge",
+        "count": 12
+      },
+      {
+        "name": "analytics",
+        "type": "transient",
+        "instance_type": "r5.8xlarge",
+        "count": 20
+      }
+    ],
+    "redshift": {
+      "cluster": "shopmax-analytics",
+      "node_type": "ra3.4xlarge",
+      "nodes": 4
+    },
+    "airflow": {
+      "type": "MWAA",
+      "environment": "shopmax-prod",
+      "workers": 5
+    }
+  },
+  "costs_monthly_usd": {
+    "emr": 45000,
+    "redshift": 12000,
+    "msk": 8000,
+    "mwaa": 3500,
+    "rds": 6000,
+    "s3": 4500,
+    "glue": 2000,
+    "total": 81000
+  }
+}

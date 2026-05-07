@@ -1,0 +1,23 @@
+resources:
+  jobs:
+    order_flow_capture:
+      name: "[prod] risk/order_flow_capture"
+      description: "Migrated from AWS: kafka → risk_bronze"
+  schedule:
+    quartz_cron_expression: "0 */5 * * * ? *"
+    timezone_id: "America/New_York"
+    pause_status: UNPAUSED
+      tasks:
+        - task_key: order_flow_capture
+          notebook_task:
+            notebook_path: pipelines/risk/order_flow_capture
+            base_parameters:
+              CATALOG: "production"
+              SCHEMA: "risk_bronze"
+              TABLE: "order_flow_capture"
+          max_retries: 2
+          timeout_seconds: 3600
+      tags:
+        domain: "risk"
+        layer: "bronze"
+        classification: "internal"

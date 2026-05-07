@@ -1,0 +1,19 @@
+resources:
+  jobs:
+    feature_store_builder:
+      name: "[prod] finance/feature_store_builder"
+      description: "Migrated from AWS: auto_loader → finance_bronze"
+      tasks:
+        - task_key: feature_store_builder
+          notebook_task:
+            notebook_path: pipelines/finance/feature_store_builder
+            base_parameters:
+              CATALOG: "acme_prod"
+              SCHEMA: "finance_bronze"
+              TABLE: "feature_store_builder"
+          max_retries: 2
+          timeout_seconds: 3600
+      tags:
+        domain: "finance"
+        layer: "bronze"
+        classification: "internal"

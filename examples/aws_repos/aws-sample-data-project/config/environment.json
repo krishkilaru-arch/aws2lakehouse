@@ -1,0 +1,236 @@
+{
+  "organization": "Acme Capital",
+  "aws_account_id": "123456789012",
+  "region": "us-east-1",
+  "emr_clusters": {
+    "j-RISKSTREAMING01": {
+      "name": "Risk Streaming Cluster",
+      "release": "emr-6.9.0",
+      "master": {
+        "instance_type": "m5.2xlarge",
+        "count": 1
+      },
+      "core": {
+        "instance_type": "r5.4xlarge",
+        "count": 4
+      },
+      "task": {
+        "instance_type": "c5.2xlarge",
+        "count": 0,
+        "max": 8,
+        "market": "SPOT"
+      },
+      "applications": [
+        "Spark",
+        "Hadoop",
+        "Ganglia"
+      ],
+      "spark_version": "3.3.0",
+      "always_running": true,
+      "monthly_cost_estimate": "$4,200"
+    },
+    "j-RISKCLUSTER01": {
+      "name": "Risk Batch Cluster",
+      "release": "emr-6.9.0",
+      "master": {
+        "instance_type": "m5.2xlarge",
+        "count": 1
+      },
+      "core": {
+        "instance_type": "r5.4xlarge",
+        "count": 10
+      },
+      "task": {
+        "instance_type": "c5.4xlarge",
+        "count": 0,
+        "max": 20,
+        "market": "SPOT"
+      },
+      "applications": [
+        "Spark",
+        "Hadoop"
+      ],
+      "spark_version": "3.3.0",
+      "always_running": false,
+      "schedule": "6am-10am daily",
+      "monthly_cost_estimate": "$2,800"
+    },
+    "j-ANALYTICS01": {
+      "name": "Analytics Cluster",
+      "release": "emr-6.9.0",
+      "master": {
+        "instance_type": "m5.xlarge",
+        "count": 1
+      },
+      "core": {
+        "instance_type": "r5.2xlarge",
+        "count": 5
+      },
+      "applications": [
+        "Spark",
+        "Hadoop",
+        "Hive"
+      ],
+      "spark_version": "3.3.0",
+      "always_running": false,
+      "schedule": "4am-8am daily",
+      "monthly_cost_estimate": "$1,500"
+    },
+    "j-MLCLUSTER01": {
+      "name": "ML Training Cluster",
+      "release": "emr-6.9.0",
+      "master": {
+        "instance_type": "m5.4xlarge",
+        "count": 1
+      },
+      "core": {
+        "instance_type": "p3.2xlarge",
+        "count": 5
+      },
+      "applications": [
+        "Spark",
+        "Hadoop",
+        "TensorFlow"
+      ],
+      "spark_version": "3.3.0",
+      "always_running": false,
+      "schedule": "Sundays 2am",
+      "monthly_cost_estimate": "$3,500"
+    }
+  },
+  "glue_jobs": {
+    "lending-extract-applications": {
+      "schedule": "hourly",
+      "dpu": 5,
+      "monthly_cost": "$450"
+    },
+    "lending-extract-customers": {
+      "schedule": "hourly",
+      "dpu": 3,
+      "monthly_cost": "$270"
+    },
+    "lending-transform-applications": {
+      "schedule": "hourly",
+      "dpu": 8,
+      "monthly_cost": "$720"
+    },
+    "customer-extract-rds": {
+      "schedule": "daily",
+      "dpu": 5,
+      "monthly_cost": "$150"
+    },
+    "customer-extract-mongo-sessions": {
+      "schedule": "daily",
+      "dpu": 3,
+      "monthly_cost": "$90"
+    },
+    "customer-extract-payments": {
+      "schedule": "daily",
+      "dpu": 3,
+      "monthly_cost": "$90"
+    },
+    "vendor-file-ingestion": {
+      "schedule": "triggered",
+      "dpu": 2,
+      "monthly_cost": "$60"
+    },
+    "payment-processing": {
+      "schedule": "every 15 min",
+      "dpu": 4,
+      "monthly_cost": "$1,200"
+    }
+  },
+  "kafka_topics": {
+    "trade-events-v2": {
+      "partitions": 12,
+      "retention_hours": 168,
+      "avg_msg_size_bytes": 2048,
+      "msgs_per_sec": 5000
+    },
+    "market-data-feed": {
+      "partitions": 6,
+      "retention_hours": 24,
+      "avg_msg_size_bytes": 512,
+      "msgs_per_sec": 50000
+    },
+    "order-flow": {
+      "partitions": 8,
+      "retention_hours": 72,
+      "avg_msg_size_bytes": 1024,
+      "msgs_per_sec": 2000
+    }
+  },
+  "databases": {
+    "lending-postgres-prod": {
+      "engine": "PostgreSQL 14.8",
+      "host": "lending-db.cluster-abc123.us-east-1.rds.amazonaws.com",
+      "tables": [
+        "loan_applications",
+        "customers",
+        "payments",
+        "credit_scores"
+      ],
+      "daily_volume_gb": 2.5
+    },
+    "mongodb-analytics": {
+      "engine": "MongoDB Atlas 6.0",
+      "cluster": "prod-cluster.acme.net",
+      "collections": [
+        "user_sessions",
+        "click_events",
+        "page_views"
+      ],
+      "daily_volume_gb": 15
+    }
+  },
+  "s3_buckets": {
+    "acme-data-lake": {
+      "size_tb": 85,
+      "purpose": "Main data lake (raw/curated/aggregated)"
+    },
+    "acme-vendor-drops": {
+      "size_gb": 50,
+      "purpose": "Vendor CSV/JSON file landing zone"
+    },
+    "acme-jars": {
+      "size_gb": 2,
+      "purpose": "JAR files for EMR jobs"
+    },
+    "acme-checkpoints": {
+      "size_gb": 100,
+      "purpose": "Spark streaming checkpoints"
+    },
+    "acme-models": {
+      "size_gb": 25,
+      "purpose": "ML model artifacts"
+    },
+    "acme-compliance-reports": {
+      "size_gb": 10,
+      "purpose": "Generated compliance reports"
+    }
+  },
+  "team": {
+    "total_engineers": 12,
+    "roles": {
+      "data_engineers": 6,
+      "ml_engineers": 2,
+      "platform_engineers": 2,
+      "analytics_engineers": 2
+    },
+    "avg_salary_monthly": 18000
+  },
+  "monthly_costs": {
+    "emr": 12000,
+    "glue": 3030,
+    "s3_storage": 2100,
+    "msk_kafka": 1800,
+    "rds": 1200,
+    "redshift": 2400,
+    "step_functions": 200,
+    "lambda": 300,
+    "cloudwatch": 400,
+    "secrets_manager": 50,
+    "personnel": 216000,
+    "total": 239480
+  }
+}

@@ -1,0 +1,23 @@
+resources:
+  jobs:
+    market_data_feed:
+      name: "[prod] risk/market_data_feed"
+      description: "Migrated from AWS: kafka → risk_bronze"
+  schedule:
+    quartz_cron_expression: "0 */1 * * * ? *"
+    timezone_id: "America/New_York"
+    pause_status: UNPAUSED
+      tasks:
+        - task_key: market_data_feed
+          notebook_task:
+            notebook_path: pipelines/risk/market_data_feed
+            base_parameters:
+              CATALOG: "production"
+              SCHEMA: "risk_bronze"
+              TABLE: "market_data_feed"
+          max_retries: 2
+          timeout_seconds: 3600
+      tags:
+        domain: "risk"
+        layer: "bronze"
+        classification: "mnpi"

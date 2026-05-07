@@ -1,0 +1,72 @@
+{
+  "jobs": [
+    {
+      "name": "acme-market-data-ingest",
+      "script": "s3://acme-artifacts/glue-scripts/jobs/bronze/market_data_ingest_job.py",
+      "extra_py_files": "s3://acme-artifacts/libs/prod/acme_datalib-2.1.0-py3-none-any.whl",
+      "role": "arn:aws:iam::123456789:role/GlueETLRole",
+      "worker_type": "G.2X",
+      "number_of_workers": 10,
+      "glue_version": "4.0",
+      "timeout": 60,
+      "max_retries": 1,
+      "schedule": "cron(0 11 * * ? *)",
+      "tags": {
+        "team": "data-engineering",
+        "domain": "market-data",
+        "classification": "mnpi"
+      }
+    },
+    {
+      "name": "acme-position-snapshot",
+      "script": "s3://acme-artifacts/glue-scripts/jobs/bronze/position_snapshot_job.py",
+      "extra_py_files": "s3://acme-artifacts/libs/prod/acme_datalib-2.1.0-py3-none-any.whl",
+      "role": "arn:aws:iam::123456789:role/GlueETLRole",
+      "worker_type": "G.2X",
+      "number_of_workers": 20,
+      "glue_version": "4.0",
+      "timeout": 90,
+      "max_retries": 2,
+      "schedule": "cron(0 12 * * ? *)",
+      "tags": {
+        "team": "data-engineering",
+        "domain": "positions",
+        "classification": "confidential"
+      }
+    },
+    {
+      "name": "acme-risk-aggregation",
+      "script": "s3://acme-artifacts/glue-scripts/jobs/silver/risk_aggregation_job.py",
+      "extra_py_files": "s3://acme-artifacts/libs/prod/acme_datalib-2.1.0-py3-none-any.whl",
+      "role": "arn:aws:iam::123456789:role/GlueETLRole",
+      "worker_type": "G.2X",
+      "number_of_workers": 40,
+      "glue_version": "4.0",
+      "timeout": 120,
+      "max_retries": 1,
+      "schedule": "cron(0 13 * * ? *)",
+      "tags": {
+        "team": "risk-engineering",
+        "domain": "risk",
+        "classification": "mnpi"
+      }
+    },
+    {
+      "name": "acme-nav-calculation",
+      "script": "s3://acme-artifacts/glue-scripts/jobs/gold/nav_calculation_job.py",
+      "extra_py_files": "s3://acme-artifacts/libs/prod/acme_datalib-2.1.0-py3-none-any.whl",
+      "role": "arn:aws:iam::123456789:role/GlueETLRole",
+      "worker_type": "G.2X",
+      "number_of_workers": 10,
+      "glue_version": "4.0",
+      "timeout": 60,
+      "max_retries": 2,
+      "schedule": "cron(0 14 * * ? *)",
+      "tags": {
+        "team": "portfolio-analytics",
+        "domain": "nav",
+        "classification": "mnpi"
+      }
+    }
+  ]
+}
