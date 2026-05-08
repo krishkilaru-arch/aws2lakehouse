@@ -11,9 +11,8 @@ Provides ready-to-use patterns for:
 - Custom API ingestion
 """
 
-from typing import Dict, List, Optional, Any
-from dataclasses import dataclass
 import logging
+from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
@@ -34,10 +33,10 @@ class IngestionConfig:
 class AutoLoaderPattern:
     """
     Auto Loader ingestion pattern for file-based data sources.
-    
+
     Supports: CSV, JSON, Parquet, Avro, ORC, Binary, Text
     Features: Schema evolution, rescue column, file notification mode
-    
+
     Usage:
         loader = AutoLoaderPattern(
             source_path="/Volumes/production/raw/orders/",
@@ -45,26 +44,26 @@ class AutoLoaderPattern:
             file_format="json",
             schema_evolution=True
         )
-        
+
         # Generate notebook code
         code = loader.generate_notebook()
-        
+
         # Or get Spark code directly
         df = loader.create_stream(spark)
     """
-    
+
     def __init__(
         self,
         source_path: str,
         target_table: str,
         file_format: str = "json",
         schema_evolution: bool = True,
-        schema_hints: Dict[str, str] = None,
+        schema_hints: dict[str, str] = None,
         checkpoint_path: str = None,
         trigger: str = "availableNow",
         rescue_column: bool = True,
         notification_mode: bool = False,
-        partition_columns: List[str] = None
+        partition_columns: list[str] = None
     ):
         self.source_path = source_path
         self.target_table = target_table
@@ -76,37 +75,37 @@ class AutoLoaderPattern:
         self.rescue_column = rescue_column
         self.notification_mode = notification_mode
         self.partition_columns = partition_columns or []
-    
+
     def generate_code(self) -> str:
         """Generate PySpark code for Auto Loader ingestion."""
-        
+
         options = [
             f'    "cloudFiles.format": "{self.file_format}"',
             f'    "cloudFiles.schemaLocation": "{self.checkpoint_path}/schema"',
         ]
-        
+
         if self.schema_evolution:
             options.append('    "cloudFiles.schemaEvolutionMode": "addNewColumns"')
-        
+
         if self.rescue_column:
             options.append('    "cloudFiles.rescuedDataColumn": "_rescued_data"')
-        
+
         if self.notification_mode:
             options.append('    "cloudFiles.useNotifications": "true"')
-        
+
         if self.schema_hints:
             hints = ", ".join(f"{k} {v}" for k, v in self.schema_hints.items())
             options.append(f'    "cloudFiles.schemaHints": "{hints}"')
-        
+
         # Format-specific options
         if self.file_format == "csv":
             options.append('    "header": "true"')
             options.append('    "inferSchema": "true"')
         elif self.file_format == "json":
             options.append('    "multiLine": "true"')
-        
+
         options_str = ",\n".join(options)
-        
+
         # Trigger
         if self.trigger == "availableNow":
             trigger_str = ".trigger(availableNow=True)"
@@ -114,7 +113,7 @@ class AutoLoaderPattern:
             trigger_str = f'.trigger(processingTime="{self.trigger.split("=")[1] if "=" in self.trigger else "10 seconds"}")'
         else:
             trigger_str = ".trigger(availableNow=True)"
-        
+
         # Write options
         write_opts = []
         if self.schema_evolution:
@@ -122,9 +121,9 @@ class AutoLoaderPattern:
         if self.partition_columns:
             cols = ", ".join(f'"{c}"' for c in self.partition_columns)
             write_opts.append(f'    .partitionBy({cols})')
-        
+
         write_opts_str = "\n".join(write_opts)
-        
+
         code = f'''# Auto Loader Ingestion: {self.target_table}
 # Source: {self.source_path}
 # Format: {self.file_format} | Schema Evolution: {self.schema_evolution}
@@ -161,9 +160,9 @@ df = (df
 class DeltaShareCDF:
     """
     Delta Share with Change Data Feed (CDF) pattern.
-    
+
     Enables cross-organization data sharing with change tracking.
-    
+
     Usage:
         cdf = DeltaShareCDF(
             share_name="vendor_data_share",
@@ -173,7 +172,7 @@ class DeltaShareCDF:
         )
         code = cdf.generate_code()
     """
-    
+
     def __init__(
         self,
         share_name: str,
@@ -191,10 +190,10 @@ class DeltaShareCDF:
         self.profile_path = profile_path
         self.cdf_enabled = cdf_enabled
         self.starting_version = starting_version
-    
+
     def generate_code(self) -> str:
         """Generate code for Delta Share CDF ingestion."""
-        
+
         if self.cdf_enabled:
             return f'''# Delta Share with Change Data Feed (CDF)
 # Share: {self.share_name}.{self.schema_name}.{self.table_name}
@@ -222,7 +221,7 @@ from delta.tables import DeltaTable
 
 def upsert_to_delta(batch_df, batch_id):
     target = DeltaTable.forName(spark, "{self.target_table}")
-    
+
     (target.alias("t")
         .merge(batch_df.alias("s"), "t.id = s.id")
         .whenMatchedUpdateAll(condition="s._change_type = 'update_postimage'")
@@ -250,7 +249,7 @@ df.write.format("delta").mode("overwrite").saveAsTable("{self.target_table}")
 
 class KafkaIngestion:
     """Kafka Structured Streaming ingestion to Bronze layer."""
-    
+
     def __init__(
         self,
         bootstrap_servers: str,
@@ -268,7 +267,7 @@ class KafkaIngestion:
         self.consumer_group = consumer_group
         self.starting_offsets = starting_offsets
         self.value_format = value_format
-    
+
     def generate_code(self) -> str:
         """Generate Kafka ingestion code."""
         return f'''# Kafka Structured Streaming Ingestion
@@ -288,6 +287,20 @@ kafka_df = (spark.readStream
 )
 
 # Parse value (assuming JSON)
+# Infer schema from a batch sample (readStream does not support .limit())
+json_sample = (
+    spark.read
+    .format("kafka")
+    .option("kafka.bootstrap.servers", "{self.bootstrap_servers}")
+    .option("subscribe", "{self.topic}")
+    .option("startingOffsets", "earliest")
+    .option("endingOffsets", "latest")
+    .load()
+    .select(F.col("value").cast("string"))
+    .limit(100)
+)
+schema = spark.read.json(json_sample.rdd.map(lambda r: r[0])).schema
+
 parsed_df = (kafka_df
     .select(
         F.col("key").cast("string").alias("kafka_key"),
@@ -315,10 +328,10 @@ parsed_df = (kafka_df
 class ConnectorFactory:
     """
     Factory for creating data source connectors.
-    
+
     Supported: MongoDB, PostgreSQL, Snowflake, MySQL, Oracle, Elasticsearch
     """
-    
+
     CONNECTOR_TEMPLATES = {
         "mongodb": '''# MongoDB Ingestion via Spark Connector
 df = (spark.read
@@ -366,15 +379,15 @@ df = (spark.read
 df.write.format("delta").mode("overwrite").saveAsTable("{{target_table}}")
 '''
     }
-    
+
     @classmethod
-    def generate(cls, connector_type: str, params: Dict[str, str]) -> str:
+    def generate(cls, connector_type: str, params: dict[str, str]) -> str:
         """Generate connector code with parameters filled in."""
         template = cls.CONNECTOR_TEMPLATES.get(connector_type, "")
         if not template:
             raise ValueError(f"Unknown connector type: {connector_type}")
-        
+
         for key, value in params.items():
             template = template.replace("{{" + key + "}}", value)
-        
+
         return template

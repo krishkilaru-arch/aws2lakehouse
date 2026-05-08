@@ -9,9 +9,9 @@ Handles:
 - Cost comparison estimates
 """
 
-from typing import Dict, List, Optional, Tuple
-from dataclasses import dataclass
 import logging
+from dataclasses import dataclass
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -26,35 +26,35 @@ class DatabricksClusterConfig:
     num_workers: int = 4
     autoscale_min: Optional[int] = None
     autoscale_max: Optional[int] = None
-    
+
     # Compute type recommendation
     compute_type: str = "job_cluster"  # job_cluster, serverless, shared
-    
+
     # Spark configuration
-    spark_conf: Dict[str, str] = None
-    
+    spark_conf: dict[str, str] = None
+
     # AWS attributes
     availability: str = "SPOT_WITH_FALLBACK"
     first_on_demand: int = 1
     ebs_volume_type: str = "GENERAL_PURPOSE_SSD"
     ebs_volume_count: int = 1
     ebs_volume_size: int = 100
-    
+
     # Init scripts (from EMR bootstrap actions)
-    init_scripts: List[Dict] = None
-    
+    init_scripts: list[dict] = None
+
     # Cost estimate
     estimated_dbu_per_hour: float = 0.0
     estimated_monthly_cost: float = 0.0
     cost_vs_emr_pct: float = 0.0  # negative = savings
-    
+
     def __post_init__(self):
         self.spark_conf = self.spark_conf or {}
         self.init_scripts = self.init_scripts or []
         if not self.driver_node_type_id:
             self.driver_node_type_id = self.node_type_id
-    
-    def to_api_payload(self) -> Dict:
+
+    def to_api_payload(self) -> dict:
         """Convert to Databricks Jobs API cluster spec."""
         cluster = {
             "spark_version": self.spark_version,
@@ -69,7 +69,7 @@ class DatabricksClusterConfig:
                 "ebs_volume_size": self.ebs_volume_size
             }
         }
-        
+
         if self.autoscale_min is not None:
             cluster["autoscale"] = {
                 "min_workers": self.autoscale_min,
@@ -77,23 +77,23 @@ class DatabricksClusterConfig:
             }
         else:
             cluster["num_workers"] = self.num_workers
-        
+
         if self.init_scripts:
             cluster["init_scripts"] = self.init_scripts
-            
+
         return cluster
 
 
 class ClusterMapper:
     """
     Maps EMR cluster configurations to optimal Databricks compute.
-    
+
     Mapping Strategy:
     1. Match memory/CPU ratio to best Databricks node type
     2. Account for EMR overhead (YARN, node managers)
     3. Apply Photon acceleration factor (typically 2-3x for SQL/ETL)
     4. Recommend compute type based on workload pattern
-    
+
     Usage:
         mapper = ClusterMapper()
         config = mapper.map_emr_cluster(
@@ -103,7 +103,7 @@ class ClusterMapper:
             workload_type="batch_etl"
         )
     """
-    
+
     # EMR instance type specifications (comprehensive)
     # Source: AWS EC2 instance type catalog as of 2025
     EMR_INSTANCE_SPECS = {
@@ -160,7 +160,7 @@ class ClusterMapper:
         "m7i.16xlarge": {"vcpu": 64,  "memory_gb": 256,  "category": "general", "network_gbps": 25,  "storage": "EBS", "price_per_hr": 3.226},
         "m7i.24xlarge": {"vcpu": 96,  "memory_gb": 384,  "category": "general", "network_gbps": 37.5, "storage": "EBS", "price_per_hr": 4.838},
         "m7i.48xlarge": {"vcpu": 192, "memory_gb": 768,  "category": "general", "network_gbps": 50,  "storage": "EBS", "price_per_hr": 9.677},
-        
+
         # ═══════════════════════════════════════════════════════════════
         # MEMORY OPTIMIZED (R-series) — high memory:CPU ratio
         # Best for: large shuffles, caching, broadcast joins, Spark SQL
@@ -205,7 +205,7 @@ class ClusterMapper:
         "r6g.8xlarge":  {"vcpu": 32,  "memory_gb": 256,  "category": "memory_arm", "network_gbps": 12, "storage": "EBS", "price_per_hr": 1.613},
         "r6g.12xlarge": {"vcpu": 48,  "memory_gb": 384,  "category": "memory_arm", "network_gbps": 20, "storage": "EBS", "price_per_hr": 2.419},
         "r6g.16xlarge": {"vcpu": 64,  "memory_gb": 512,  "category": "memory_arm", "network_gbps": 25, "storage": "EBS", "price_per_hr": 3.226},
-        
+
         # ═══════════════════════════════════════════════════════════════
         # COMPUTE OPTIMIZED (C-series) — high CPU:memory ratio
         # Best for: CPU-bound transforms, ML inference, UDFs, compression
@@ -232,7 +232,7 @@ class ClusterMapper:
         "c6i.16xlarge": {"vcpu": 64,  "memory_gb": 128,  "category": "compute", "network_gbps": 25,  "storage": "EBS", "price_per_hr": 2.720},
         "c6i.24xlarge": {"vcpu": 96,  "memory_gb": 192,  "category": "compute", "network_gbps": 37.5, "storage": "EBS", "price_per_hr": 4.080},
         "c6i.32xlarge": {"vcpu": 128, "memory_gb": 256,  "category": "compute", "network_gbps": 50,  "storage": "EBS", "price_per_hr": 5.440},
-        
+
         # ═══════════════════════════════════════════════════════════════
         # STORAGE OPTIMIZED (I/D-series) — high I/O, local NVMe
         # Best for: shuffle-heavy, large datasets, Delta Lake compaction
@@ -255,7 +255,7 @@ class ClusterMapper:
         "d2.2xlarge":   {"vcpu": 8,   "memory_gb": 61,    "category": "storage", "network_gbps": 10,  "storage": "6x2TB HDD",    "price_per_hr": 1.380},
         "d2.4xlarge":   {"vcpu": 16,  "memory_gb": 122,   "category": "storage", "network_gbps": 10,  "storage": "12x2TB HDD",   "price_per_hr": 2.760},
         "d2.8xlarge":   {"vcpu": 36,  "memory_gb": 244,   "category": "storage", "network_gbps": 10,  "storage": "24x2TB HDD",   "price_per_hr": 5.520},
-        
+
         # ═══════════════════════════════════════════════════════════════
         # GPU INSTANCES — ML training, deep learning, GPU-accelerated ETL
         # Best for: ML model training, inference, GPU UDFs
@@ -283,7 +283,7 @@ class ClusterMapper:
         "g5.12xlarge":  {"vcpu": 48,  "memory_gb": 192,   "category": "gpu", "gpus": 4, "gpu_type": "A10G", "gpu_mem_gb": 96,  "price_per_hr": 5.672},
         "g5.24xlarge":  {"vcpu": 96,  "memory_gb": 384,   "category": "gpu", "gpus": 4, "gpu_type": "A10G", "gpu_mem_gb": 96,  "price_per_hr": 8.144},
         "g5.48xlarge":  {"vcpu": 192, "memory_gb": 768,   "category": "gpu", "gpus": 8, "gpu_type": "A10G", "gpu_mem_gb": 192, "price_per_hr": 16.288},
-        
+
         # ═══════════════════════════════════════════════════════════════
         # HIGH MEMORY (X/U-series) — very large memory footprint
         # Best for: in-memory analytics, very large broadcasts, graph
@@ -300,7 +300,7 @@ class ClusterMapper:
         "x2idn.24xlarge":{"vcpu": 96, "memory_gb": 1536,  "category": "highmem", "network_gbps": 75,  "storage": "2x1900GB NVMe","price_per_hr": 10.003},
         "x2idn.32xlarge":{"vcpu": 128,"memory_gb": 2048,  "category": "highmem", "network_gbps": 100, "storage": "2x1900GB NVMe","price_per_hr": 13.338},
     }
-    
+
     # Databricks node type mapping (best match by use case)
     DATABRICKS_NODE_MAP = {
         # category -> {size_class -> databricks_node_type}
@@ -361,7 +361,7 @@ class ClusterMapper:
             "2xlarge": "x1.32xlarge",
         },
     }
-    
+
     # Photon acceleration factors by workload type
     PHOTON_FACTORS = {
         "batch_etl": 2.5,       # ETL benefits heavily from Photon
@@ -370,13 +370,13 @@ class ClusterMapper:
         "streaming": 1.5,       # Moderate benefit
         "general": 2.0,
     }
-    
+
     def __init__(self, photon_enabled: bool = True, target_runtime: str = "15.4.x-scala2.12"):
         self.photon_enabled = photon_enabled
         self.target_runtime = target_runtime
         if photon_enabled and "photon" not in target_runtime:
             self.target_runtime = target_runtime.replace("-scala2.12", "-photon-scala2.12")
-    
+
     def map_emr_cluster(
         self,
         instance_type: str,
@@ -387,12 +387,12 @@ class ClusterMapper:
         has_autoscaling: bool = False,
         min_instances: int = None,
         max_instances: int = None,
-        bootstrap_actions: List[Dict] = None,
-        spark_config: Dict[str, str] = None
+        bootstrap_actions: list[dict] = None,
+        spark_config: dict[str, str] = None
     ) -> DatabricksClusterConfig:
         """
         Map an EMR cluster configuration to Databricks.
-        
+
         Args:
             instance_type: EC2 instance type (e.g., "r5.2xlarge")
             instance_count: Number of core/task nodes
@@ -407,40 +407,40 @@ class ClusterMapper:
         """
         bootstrap_actions = bootstrap_actions or []
         spark_config = spark_config or {}
-        
+
         # Get EMR instance specs
         specs = self.EMR_INSTANCE_SPECS.get(instance_type, {})
         if not specs:
             logger.warning(f"Unknown instance type: {instance_type}, using defaults")
             specs = {"vcpu": 4, "memory_gb": 16, "category": "general"}
-        
+
         # Calculate total cluster resources
-        total_vcpu = specs["vcpu"] * instance_count
-        total_memory_gb = specs["memory_gb"] * instance_count
+        specs["vcpu"] * instance_count
+        specs["memory_gb"] * instance_count
         category = specs["category"]
-        
+
         # Apply Photon factor — Databricks needs fewer nodes
         photon_factor = self.PHOTON_FACTORS.get(workload_type, 2.0) if self.photon_enabled else 1.0
-        
+
         # Calculate right-sized Databricks cluster
         # Factor in: Photon speedup + better resource management + avg utilization
         effective_factor = photon_factor * (1 / max(avg_utilization, 0.3))
         target_nodes = max(1, int(instance_count / effective_factor))
-        
+
         # Map to Databricks node type
         databricks_node = self._select_node_type(specs, category)
-        
+
         # Determine compute type
         compute_type = self._recommend_compute_type(
             workload_type, instance_count, spark_config
         )
-        
+
         # Convert Spark configs (remove EMR-specific, add Databricks-specific)
         db_spark_conf = self._convert_spark_config(spark_config, emr_release)
-        
+
         # Convert bootstrap actions to init scripts
         init_scripts = self._convert_bootstrap_actions(bootstrap_actions)
-        
+
         # Build cluster config
         config = DatabricksClusterConfig(
             cluster_name=f"migrated_{instance_type}_{instance_count}n",
@@ -451,28 +451,28 @@ class ClusterMapper:
             spark_conf=db_spark_conf,
             init_scripts=init_scripts
         )
-        
+
         # Handle autoscaling
         if has_autoscaling and min_instances and max_instances:
             config.autoscale_min = max(1, int(min_instances / effective_factor))
             config.autoscale_max = max(config.autoscale_min + 1, int(max_instances / effective_factor))
-        
+
         # Cost estimation
         config.estimated_dbu_per_hour = target_nodes * self._dbu_rate(databricks_node)
         config.estimated_monthly_cost = config.estimated_dbu_per_hour * 720 * 0.15  # ~$0.15/DBU
-        
+
         logger.info(
             f"Mapped EMR {instance_type}x{instance_count} → "
             f"Databricks {databricks_node}x{target_nodes} "
             f"({compute_type}, photon={self.photon_enabled})"
         )
-        
+
         return config
-    
-    def _select_node_type(self, specs: Dict, category: str) -> str:
+
+    def _select_node_type(self, specs: dict, category: str) -> str:
         """Select best Databricks node type based on EMR instance specs."""
         memory_gb = specs["memory_gb"]
-        
+
         # Size classification based on memory
         if memory_gb <= 16:
             size = "small"
@@ -484,37 +484,37 @@ class ClusterMapper:
             size = "xlarge"
         else:
             size = "2xlarge"
-        
+
         node_map = self.DATABRICKS_NODE_MAP.get(category, self.DATABRICKS_NODE_MAP["general"])
         return node_map.get(size, "i3.xlarge")
-    
+
     def _recommend_compute_type(
-        self, workload_type: str, instance_count: int, spark_config: Dict
+        self, workload_type: str, instance_count: int, spark_config: dict
     ) -> str:
         """Recommend Databricks compute type based on workload."""
         # Serverless: best for short-running, intermittent batch jobs
         if workload_type == "batch_etl" and instance_count <= 10:
             return "serverless"
-        
+
         # Streaming always needs dedicated job clusters
         if workload_type == "streaming":
             return "job_cluster"
-        
+
         # Large ML training needs job clusters with specific configs
         if workload_type == "ml_training":
             return "job_cluster"
-        
+
         # SQL analytics → SQL Warehouse
         if workload_type == "sql_analytics":
             return "sql_warehouse"
-        
+
         # Default: job cluster for isolation
         return "job_cluster"
-    
-    def _convert_spark_config(self, emr_config: Dict[str, str], emr_release: str) -> Dict[str, str]:
+
+    def _convert_spark_config(self, emr_config: dict[str, str], emr_release: str) -> dict[str, str]:
         """Convert EMR Spark configs to Databricks equivalents."""
         db_config = {}
-        
+
         # Configs to remove (EMR-specific or Databricks defaults)
         skip_prefixes = [
             "spark.yarn.",
@@ -523,7 +523,7 @@ class ClusterMapper:
             "spark.hadoop.fs.s3.",  # EMRFS-specific
             "spark.decommission.",
         ]
-        
+
         # Configs to transform
         transforms = {
             "spark.hadoop.fs.s3a.endpoint": None,  # Remove (not needed in Databricks)
@@ -535,12 +535,12 @@ class ClusterMapper:
             "spark.executor.memory": None,  # Managed by Databricks
             "spark.executor.cores": None,   # Managed by Databricks
         }
-        
+
         for key, value in emr_config.items():
             # Skip EMR-specific
             if any(key.startswith(p) for p in skip_prefixes):
                 continue
-            
+
             # Apply transforms
             if key in transforms:
                 new_key = transforms[key]
@@ -549,32 +549,30 @@ class ClusterMapper:
             else:
                 # Keep other configs as-is
                 db_config[key] = value
-        
+
         # Add Databricks-recommended defaults
         db_config.setdefault("spark.sql.adaptive.enabled", "true")
         db_config.setdefault("spark.sql.adaptive.coalescePartitions.enabled", "true")
         db_config.setdefault("spark.databricks.delta.optimizeWrite.enabled", "true")
         db_config.setdefault("spark.databricks.delta.autoCompact.enabled", "true")
-        
+
         return db_config
-    
-    def _convert_bootstrap_actions(self, bootstrap_actions: List[Dict]) -> List[Dict]:
+
+    def _convert_bootstrap_actions(self, bootstrap_actions: list[dict]) -> list[dict]:
         """Convert EMR bootstrap actions to Databricks init scripts."""
         init_scripts = []
-        
+
         for action in bootstrap_actions:
             script_path = action.get("ScriptBootstrapAction", {}).get("Path", "")
-            if script_path:
+            if script_path and script_path.startswith("s3://"):
                 # Convert S3 path to Databricks volume or DBFS path
-                if script_path.startswith("s3://"):
-                    # Map to workspace or volume
-                    volume_path = script_path.replace("s3://", "/Volumes/external/init_scripts/")
-                    init_scripts.append({
-                        "workspace": {"destination": volume_path}
-                    })
-        
+                volume_path = script_path.replace("s3://", "/Volumes/external/init_scripts/")
+                init_scripts.append({
+                    "workspace": {"destination": volume_path}
+                })
+
         return init_scripts
-    
+
     def _dbu_rate(self, node_type: str) -> float:
         """Estimate DBU consumption rate per node per hour."""
         dbu_rates = {
@@ -584,14 +582,14 @@ class ClusterMapper:
             "c5.xlarge": 0.5, "c5.2xlarge": 1.0, "c5.4xlarge": 2.0, "c5.9xlarge": 4.5,
         }
         return dbu_rates.get(node_type, 1.5)
-    
+
     def generate_comparison_report(
-        self, emr_configs: List[Dict], monthly_emr_cost: float
-    ) -> Dict:
+        self, emr_configs: list[dict], monthly_emr_cost: float
+    ) -> dict:
         """Generate cost/performance comparison between EMR and Databricks."""
         total_dbu = 0
         mappings = []
-        
+
         for config in emr_configs:
             db_config = self.map_emr_cluster(**config)
             mappings.append({
@@ -601,9 +599,9 @@ class ClusterMapper:
                 "monthly_cost": db_config.estimated_monthly_cost
             })
             total_dbu += db_config.estimated_dbu_per_hour
-        
+
         total_db_cost = sum(m["monthly_cost"] for m in mappings)
-        
+
         return {
             "emr_monthly_cost": monthly_emr_cost,
             "databricks_estimated_monthly_cost": total_db_cost,

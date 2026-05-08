@@ -1,19 +1,25 @@
 resources:
   jobs:
-    silver_to_gold:
+    finance_gold_silver_to_gold:
       name: "[prod] finance/silver_to_gold"
-      description: "Migrated from AWS: auto_loader → finance_bronze"
-      tasks:
-        - task_key: silver_to_gold
-          notebook_task:
-            notebook_path: pipelines/finance/silver_to_gold
-            base_parameters:
-              CATALOG: "acme_prod"
-              SCHEMA: "finance_bronze"
-              TABLE: "silver_to_gold"
-          max_retries: 2
-          timeout_seconds: 3600
       tags:
         domain: "finance"
-        layer: "bronze"
+        layer: "gold"
         classification: "internal"
+      tasks:
+        - task_key: "silver_to_gold"
+          notebook_task:
+            notebook_path: "src/pipelines/finance/gold/silver_to_gold"
+            base_parameters:
+              catalog: "acme_prod"
+              schema: "finance_gold"
+              table: "silver_to_gold"
+          timeout_seconds: 3600
+          max_retries: 2
+          environment_key: "serverless"
+      environments:
+        - environment_key: "serverless"
+          spec:
+            client: "1"
+      queue:
+        enabled: true

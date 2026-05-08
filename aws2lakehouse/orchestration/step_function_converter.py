@@ -16,11 +16,11 @@ Supports:
 - Nested state machines → Nested job references
 """
 
-from typing import Dict, List, Optional, Any, Tuple
-from dataclasses import dataclass, field
 import json
-import re
 import logging
+import re
+from dataclasses import dataclass, field
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -31,28 +31,28 @@ class LakeflowTask:
     task_key: str
     description: str = ""
     task_type: str = "notebook_task"  # notebook_task, python_wheel_task, spark_submit_task, pipeline_task
-    
+
     # Task configuration
     notebook_path: str = ""
     python_file: str = ""
     main_class: str = ""
-    parameters: Dict[str, str] = field(default_factory=dict)
-    
+    parameters: dict[str, str] = field(default_factory=dict)
+
     # Dependencies
-    depends_on: List[str] = field(default_factory=list)
-    
+    depends_on: list[str] = field(default_factory=list)
+
     # Execution
     timeout_seconds: int = 3600
     max_retries: int = 0
     retry_on_timeout: bool = True
-    
+
     # Cluster
     job_cluster_key: str = "shared_cluster"
-    
+
     # Condition (for Choice states)
-    condition_task: Optional[Dict] = None
-    
-    def to_api_payload(self) -> Dict:
+    condition_task: Optional[dict] = None
+
+    def to_api_payload(self) -> dict:
         """Convert to Databricks Jobs API task payload."""
         task = {
             "task_key": self.task_key,
@@ -60,13 +60,13 @@ class LakeflowTask:
             "max_retries": self.max_retries,
             "retry_on_timeout": self.retry_on_timeout,
         }
-        
+
         if self.description:
             task["description"] = self.description
-        
+
         if self.depends_on:
             task["depends_on"] = [{"task_key": dep} for dep in self.depends_on]
-        
+
         if self.task_type == "notebook_task":
             task["notebook_task"] = {
                 "notebook_path": self.notebook_path,
@@ -77,20 +77,20 @@ class LakeflowTask:
             task["python_wheel_task"] = {
                 "package_name": self.parameters.get("package", ""),
                 "entry_point": self.parameters.get("entry_point", "main"),
-                "parameters": [f"--{k}={v}" for k, v in self.parameters.items() 
+                "parameters": [f"--{k}={v}" for k, v in self.parameters.items()
                               if k not in ("package", "entry_point")]
             }
         elif self.task_type == "spark_submit_task":
             task["spark_submit_task"] = {
-                "parameters": [self.main_class] + 
+                "parameters": [self.main_class] +
                              [f"--{k}={v}" for k, v in self.parameters.items()]
             }
-        
+
         if self.condition_task:
             task["condition_task"] = self.condition_task
-        
+
         task["job_cluster_key"] = self.job_cluster_key
-        
+
         return task
 
 
@@ -99,15 +99,15 @@ class LakeflowJob:
     """Complete Lakeflow Job definition."""
     name: str
     description: str = ""
-    tasks: List[LakeflowTask] = field(default_factory=list)
-    job_clusters: List[Dict] = field(default_factory=list)
-    schedule: Optional[Dict] = None
-    email_notifications: Dict = field(default_factory=dict)
-    tags: Dict[str, str] = field(default_factory=dict)
+    tasks: list[LakeflowTask] = field(default_factory=list)
+    job_clusters: list[dict] = field(default_factory=list)
+    schedule: Optional[dict] = None
+    email_notifications: dict = field(default_factory=dict)
+    tags: dict[str, str] = field(default_factory=dict)
     max_concurrent_runs: int = 1
     timeout_seconds: int = 86400
-    
-    def to_api_payload(self) -> Dict:
+
+    def to_api_payload(self) -> dict:
         """Convert to full Databricks Jobs API create payload."""
         payload = {
             "name": self.name,
@@ -118,35 +118,35 @@ class LakeflowJob:
             "timeout_seconds": self.timeout_seconds,
             "tags": self.tags
         }
-        
+
         if self.schedule:
             payload["schedule"] = self.schedule
         if self.email_notifications:
             payload["email_notifications"] = self.email_notifications
-            
+
         return payload
 
 
 class StepFunctionConverter:
     """
     Converts AWS Step Functions state machine definitions to Lakeflow Jobs.
-    
+
     Usage:
         converter = StepFunctionConverter(
             target_notebook_base="/Workspace/Users/team/migrated/",
             default_cluster_key="shared_etl"
         )
-        
+
         # From Step Function JSON
         with open("state_machine.json") as f:
             definition = json.load(f)
-        
+
         lakeflow_job = converter.convert(definition)
-        
+
         # Deploy
         converter.deploy(lakeflow_job, workspace_url, token)
     """
-    
+
     def __init__(
         self,
         target_notebook_base: str = "/Workspace/Repos/migration/",
@@ -156,18 +156,18 @@ class StepFunctionConverter:
         self.target_notebook_base = target_notebook_base
         self.default_cluster_key = default_cluster_key
         self.default_timeout_seconds = default_timeout_seconds
-        self._warnings: List[str] = []
-        self._manual_steps: List[str] = []
-    
+        self._warnings: list[str] = []
+        self._manual_steps: list[str] = []
+
     def convert(
         self,
-        step_function_definition: Dict[str, Any],
+        step_function_definition: dict[str, Any],
         name: str = None,
         schedule_expression: str = None
     ) -> LakeflowJob:
         """
         Convert a Step Function definition to a Lakeflow Job.
-        
+
         Args:
             step_function_definition: Step Function ASL definition (States, StartAt, etc.)
             name: Override name for the job
@@ -175,18 +175,18 @@ class StepFunctionConverter:
         """
         self._warnings = []
         self._manual_steps = []
-        
+
         states = step_function_definition.get("States", {})
         start_at = step_function_definition.get("StartAt", "")
         comment = step_function_definition.get("Comment", "")
-        
+
         job_name = name or step_function_definition.get("Comment", "migrated_workflow")
-        
+
         logger.info(f"Converting Step Function: {job_name} ({len(states)} states)")
-        
+
         # Build state graph and convert each state
         tasks = self._convert_states(states, start_at)
-        
+
         # Build job
         job = LakeflowJob(
             name=job_name,
@@ -199,65 +199,65 @@ class StepFunctionConverter:
                 "original_states": str(len(states))
             }
         )
-        
+
         # Convert schedule if provided
         if schedule_expression:
             job.schedule = self._convert_schedule(schedule_expression)
-        
+
         logger.info(f"Converted to Lakeflow Job: {len(tasks)} tasks")
         if self._warnings:
             for w in self._warnings:
                 logger.warning(f"  ⚠️  {w}")
-        
+
         return job
-    
-    def _convert_states(self, states: Dict, start_at: str) -> List[LakeflowTask]:
+
+    def _convert_states(self, states: dict, start_at: str) -> list[LakeflowTask]:
         """Convert all states to Lakeflow tasks preserving dependency order."""
         tasks = []
         visited = set()
         task_map = {}  # state_name -> task_key
-        
+
         # Topological traversal from StartAt
         self._traverse_states(states, start_at, tasks, visited, task_map, parent_task=None)
-        
+
         return tasks
-    
+
     def _traverse_states(
-        self, states: Dict, state_name: str, tasks: List[LakeflowTask],
-        visited: set, task_map: Dict, parent_task: Optional[str]
+        self, states: dict, state_name: str, tasks: list[LakeflowTask],
+        visited: set, task_map: dict, parent_task: Optional[str]
     ):
         """Recursively traverse and convert states."""
         if state_name in visited or state_name not in states:
             return
-        
+
         visited.add(state_name)
         state = states[state_name]
         state_type = state.get("Type", "")
-        
+
         task_key = self._sanitize_task_key(state_name)
         task_map[state_name] = task_key
-        
+
         if state_type == "Task":
             task = self._convert_task_state(state_name, state, parent_task)
             tasks.append(task)
-        
+
         elif state_type == "Parallel":
             # Convert parallel branches
             parallel_tasks = self._convert_parallel_state(state_name, state, parent_task, states, visited, task_map)
             tasks.extend(parallel_tasks)
             # The join point is the last task from parallel
             task_key = f"{task_key}_join"
-        
+
         elif state_type == "Choice":
             # Convert choice to condition_task
             choice_tasks = self._convert_choice_state(state_name, state, parent_task, states, visited, task_map)
             tasks.extend(choice_tasks)
             return  # Choice handles its own Next traversal
-        
+
         elif state_type == "Map":
             task = self._convert_map_state(state_name, state, parent_task)
             tasks.append(task)
-        
+
         elif state_type == "Wait":
             # Wait states don't have direct Databricks equivalent
             # Convert to a pass-through notebook with sleep
@@ -271,26 +271,26 @@ class StepFunctionConverter:
             )
             tasks.append(task)
             self._warnings.append(f"Wait state '{state_name}' converted to notebook sleep — review for better pattern")
-        
+
         elif state_type in ("Pass", "Succeed"):
             # Skip pass/succeed states, just continue the chain
             pass
-        
+
         elif state_type == "Fail":
             self._warnings.append(f"Fail state '{state_name}' — implement error handling in upstream task")
             return
-        
+
         # Follow Next state
         next_state = state.get("Next")
         if next_state and not state.get("End", False):
             current_task = task_key if state_type in ("Task", "Wait", "Map") else parent_task
             self._traverse_states(states, next_state, tasks, visited, task_map, current_task)
-    
-    def _convert_task_state(self, name: str, state: Dict, parent_task: Optional[str]) -> LakeflowTask:
+
+    def _convert_task_state(self, name: str, state: dict, parent_task: Optional[str]) -> LakeflowTask:
         """Convert a Task state to a Lakeflow task."""
         resource = state.get("Resource", "")
         task_key = self._sanitize_task_key(name)
-        
+
         # Determine task type based on resource ARN
         if "glue" in resource.lower():
             # Glue job → notebook task
@@ -305,7 +305,7 @@ class StepFunctionConverter:
                 timeout_seconds=state.get("TimeoutSeconds", self.default_timeout_seconds),
                 max_retries=self._extract_retry_count(state)
             )
-        
+
         elif "lambda" in resource.lower():
             # Lambda → lightweight python task
             function_name = state.get("Parameters", {}).get("FunctionName", name)
@@ -320,7 +320,7 @@ class StepFunctionConverter:
                 max_retries=self._extract_retry_count(state)
             )
             self._manual_steps.append(f"Migrate Lambda '{function_name}' logic to Databricks notebook")
-        
+
         elif "emr" in resource.lower() or "elasticmapreduce" in resource.lower():
             # EMR step → spark job task
             step_config = state.get("Parameters", {})
@@ -334,7 +334,7 @@ class StepFunctionConverter:
                 timeout_seconds=state.get("TimeoutSeconds", self.default_timeout_seconds),
                 max_retries=self._extract_retry_count(state)
             )
-        
+
         elif "ecs" in resource.lower() or "batch" in resource.lower():
             # ECS/Batch → container task or notebook
             task = LakeflowTask(
@@ -348,7 +348,7 @@ class StepFunctionConverter:
                 max_retries=self._extract_retry_count(state)
             )
             self._manual_steps.append(f"Containerized task '{name}' needs rewrite as Spark/Python")
-        
+
         else:
             # Generic task
             task = LakeflowTask(
@@ -361,34 +361,34 @@ class StepFunctionConverter:
                 timeout_seconds=state.get("TimeoutSeconds", self.default_timeout_seconds),
                 max_retries=self._extract_retry_count(state)
             )
-        
+
         return task
-    
+
     def _convert_parallel_state(
-        self, name: str, state: Dict, parent_task: Optional[str],
-        all_states: Dict, visited: set, task_map: Dict
-    ) -> List[LakeflowTask]:
+        self, name: str, state: dict, parent_task: Optional[str],
+        all_states: dict, visited: set, task_map: dict
+    ) -> list[LakeflowTask]:
         """Convert Parallel state to multiple independent task branches."""
         tasks = []
         branch_end_tasks = []
-        
-        for i, branch in enumerate(state.get("Branches", [])):
+
+        for _i, branch in enumerate(state.get("Branches", [])):
             branch_states = branch.get("States", {})
             branch_start = branch.get("StartAt", "")
-            
+
             # Convert each branch as independent tasks depending on parent
             branch_tasks = []
             self._traverse_states(
-                branch_states, branch_start, branch_tasks, 
+                branch_states, branch_start, branch_tasks,
                 set(), task_map, parent_task
             )
-            
+
             # Track end of each branch for join
             if branch_tasks:
                 branch_end_tasks.append(branch_tasks[-1].task_key)
-            
+
             tasks.extend(branch_tasks)
-        
+
         # Create a join task that depends on all branches
         if branch_end_tasks:
             join_task = LakeflowTask(
@@ -399,20 +399,20 @@ class StepFunctionConverter:
                 depends_on=branch_end_tasks
             )
             tasks.append(join_task)
-        
+
         return tasks
-    
+
     def _convert_choice_state(
-        self, name: str, state: Dict, parent_task: Optional[str],
-        all_states: Dict, visited: set, task_map: Dict
-    ) -> List[LakeflowTask]:
+        self, name: str, state: dict, parent_task: Optional[str],
+        all_states: dict, visited: set, task_map: dict
+    ) -> list[LakeflowTask]:
         """Convert Choice state to conditional task execution."""
         tasks = []
-        
+
         # Create a condition evaluation task
         choices = state.get("Choices", [])
         default = state.get("Default", "")
-        
+
         # For simple choices, use run_if condition
         # For complex choices, use a condition notebook
         condition_task = LakeflowTask(
@@ -424,27 +424,27 @@ class StepFunctionConverter:
             parameters={"choices": json.dumps(choices[:3])}  # First few for reference
         )
         tasks.append(condition_task)
-        
+
         self._warnings.append(
             f"Choice state '{name}' converted to condition notebook — "
             f"review {len(choices)} branches for run_if/if_else_task patterns"
         )
-        
+
         # Follow default path
         if default:
             self._traverse_states(all_states, default, tasks, visited, task_map, condition_task.task_key)
-        
+
         return tasks
-    
-    def _convert_map_state(self, name: str, state: Dict, parent_task: Optional[str]) -> LakeflowTask:
+
+    def _convert_map_state(self, name: str, state: dict, parent_task: Optional[str]) -> LakeflowTask:
         """Convert Map state to for_each_task pattern."""
         task_key = self._sanitize_task_key(name)
-        
+
         self._warnings.append(
             f"Map state '{name}' → for_each_task pattern. "
             f"Review iterator and batch size configuration."
         )
-        
+
         return LakeflowTask(
             task_key=task_key,
             description=f"Map/ForEach: {state.get('Comment', name)}",
@@ -457,12 +457,12 @@ class StepFunctionConverter:
             depends_on=[parent_task] if parent_task else [],
             timeout_seconds=state.get("TimeoutSeconds", self.default_timeout_seconds * 2)
         )
-    
-    def _extract_parameters(self, state: Dict) -> Dict[str, str]:
+
+    def _extract_parameters(self, state: dict) -> dict[str, str]:
         """Extract task parameters from state definition."""
         params = {}
         raw_params = state.get("Parameters", {})
-        
+
         for key, value in raw_params.items():
             # Remove Step Functions suffixes (.$)
             clean_key = key.rstrip(".$").replace(".", "_")
@@ -470,17 +470,17 @@ class StepFunctionConverter:
                 params[clean_key] = value
             elif isinstance(value, (int, float, bool)):
                 params[clean_key] = str(value)
-        
+
         return params
-    
-    def _extract_emr_parameters(self, step_config: Dict) -> Dict[str, str]:
+
+    def _extract_emr_parameters(self, step_config: dict) -> dict[str, str]:
         """Extract parameters from EMR step configuration."""
         params = {}
-        
+
         step = step_config.get("Step", step_config)
         hadoop_jar = step.get("HadoopJarStep", {})
         args = hadoop_jar.get("Args", [])
-        
+
         # Parse spark-submit style arguments
         i = 0
         while i < len(args):
@@ -493,22 +493,22 @@ class StepFunctionConverter:
                 i += 1
             else:
                 i += 1
-        
+
         return params
-    
-    def _extract_retry_count(self, state: Dict) -> int:
+
+    def _extract_retry_count(self, state: dict) -> int:
         """Extract retry configuration from state."""
         retriers = state.get("Retry", [])
         if retriers:
             return retriers[0].get("MaxAttempts", 2)
         return 0
-    
-    def _convert_schedule(self, expression: str) -> Dict:
+
+    def _convert_schedule(self, expression: str) -> dict:
         """Convert AWS schedule expression to Databricks quartz cron."""
         # AWS formats:
         # rate(1 day), rate(6 hours)
         # cron(0 6 * * ? *)
-        
+
         if expression.startswith("cron("):
             parts = expression.replace("cron(", "").replace(")", "").split()
             if len(parts) >= 5:
@@ -520,7 +520,7 @@ class StepFunctionConverter:
                     "timezone_id": "UTC",
                     "pause_status": "PAUSED"
                 }
-        
+
         elif expression.startswith("rate("):
             rate_str = expression.replace("rate(", "").replace(")", "").strip()
             # Convert rate to approximate cron
@@ -544,11 +544,11 @@ class StepFunctionConverter:
                     "timezone_id": "UTC",
                     "pause_status": "PAUSED"
                 }
-        
+
         self._warnings.append(f"Could not convert schedule: {expression}")
         return {"quartz_cron_expression": "0 0 6 * * ?", "timezone_id": "UTC", "pause_status": "PAUSED"}
-    
-    def _default_cluster_spec(self) -> Dict:
+
+    def _default_cluster_spec(self) -> dict:
         """Generate default job cluster specification."""
         return {
             "job_cluster_key": self.default_cluster_key,
@@ -566,7 +566,7 @@ class StepFunctionConverter:
                 }
             }
         }
-    
+
     def _sanitize_task_key(self, name: str) -> str:
         """Convert state name to valid Databricks task key."""
         # Replace non-alphanumeric with underscore, lowercase
@@ -574,19 +574,19 @@ class StepFunctionConverter:
         # Remove leading/trailing underscores and collapse doubles
         key = re.sub(r"_+", "_", key).strip("_")
         return key[:100]  # Max 100 chars
-    
-    def deploy(self, job: LakeflowJob, workspace_url: str, token: str) -> Dict:
+
+    def deploy(self, job: LakeflowJob, workspace_url: str, token: str) -> dict:
         """Deploy the converted Lakeflow Job to Databricks workspace."""
         import requests
-        
+
         payload = job.to_api_payload()
-        
+
         response = requests.post(
             f"{workspace_url}/api/2.1/jobs/create",
             headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
             json=payload
         )
-        
+
         if response.status_code == 200:
             result = response.json()
             logger.info(f"✅ Deployed Lakeflow Job: ID={result.get('job_id')}")
@@ -594,11 +594,11 @@ class StepFunctionConverter:
         else:
             logger.error(f"❌ Deploy failed: {response.status_code} - {response.text}")
             raise RuntimeError(f"Job deployment failed: {response.text}")
-    
+
     @property
-    def warnings(self) -> List[str]:
+    def warnings(self) -> list[str]:
         return self._warnings
-    
+
     @property
-    def manual_steps(self) -> List[str]:
+    def manual_steps(self) -> list[str]:
         return self._manual_steps

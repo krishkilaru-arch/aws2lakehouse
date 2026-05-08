@@ -6,9 +6,10 @@ for intelligent migration tasks.
 """
 import json
 import os
-import requests
-from typing import Optional, Dict, Any, List
 from dataclasses import dataclass, field
+from typing import Any, Optional
+
+import requests
 
 
 @dataclass
@@ -17,7 +18,7 @@ class ComparisonResult:
     pipeline_name: str
     verdict: str              # "PASS", "WARN", "FAIL"
     logic_parity: bool        # Core business logic preserved
-    issues: List[Dict[str, str]] = field(default_factory=list)  # [{severity, category, description, suggestion}]
+    issues: list[dict[str, str]] = field(default_factory=list)  # [{severity, category, description, suggestion}]
     summary: str = ""         # Plain-English summary
     confidence: float = 0.0   # 0.0–1.0 confidence in the assessment
 
@@ -42,21 +43,21 @@ class ComparisonResult:
 
 class AIClient:
     """Databricks Foundation Model client for migration intelligence."""
-    
+
     MODELS = {
         "opus":   "databricks-claude-opus-4-6",
         "sonnet": "databricks-claude-sonnet-4-5",
         "haiku":  "databricks-claude-haiku-4-5",
     }
-    
+
     def __init__(self, model: str = "opus", max_tokens: int = 4096):
         self.model = self.MODELS.get(model, model)
         self.max_tokens = max_tokens
-        
+
         # Auth: try env vars first, then SDK, then notebook context
         self.host = os.environ.get("DATABRICKS_HOST", "")
         token = os.environ.get("DATABRICKS_TOKEN", "")
-        
+
         if not self.host or not token:
             try:
                 from databricks.sdk import WorkspaceClient
@@ -77,15 +78,15 @@ class AIClient:
                     "Set DATABRICKS_HOST and DATABRICKS_TOKEN env vars, "
                     "or run inside a Databricks notebook/cluster."
                 )
-        
+
         self._headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
         self._total_tokens = 0
-    
-    def _call(self, messages: List[Dict], temperature: float = 0.2,
+
+    def _call(self, messages: list[dict], temperature: float = 0.2,
               max_tokens: Optional[int] = None) -> str:
         """Make API call with retry logic and token validation."""
         import time
-        
+
         # A2: Estimate input tokens and truncate if needed
         total_chars = sum(len(m.get("content", "")) for m in messages)
         max_input_chars = 800_000  # ~200K tokens safe limit for opus (1M ctx)
@@ -96,7 +97,7 @@ class AIClient:
                 if len(m.get("content", "")) > excess + 1000:
                     m["content"] = m["content"][:len(m["content"]) - excess] + "\n[TRUNCATED]"
                     break
-        
+
         # A1: Retry with exponential backoff
         last_error = None
         for attempt in range(3):
@@ -104,7 +105,7 @@ class AIClient:
                 response = requests.post(
                     f"{self.host}/serving-endpoints/{self.model}/invocations",
                     headers=self._headers,
-                    json={"messages": messages, "max_tokens": max_tokens or self.max_tokens, 
+                    json={"messages": messages, "max_tokens": max_tokens or self.max_tokens,
                           "temperature": temperature},
                     timeout=120
                 )
@@ -113,21 +114,21 @@ class AIClient:
                     time.sleep(wait)
                     continue
                 response.raise_for_status()
-                
+
                 content = response.json()["choices"][0]["message"]["content"]
-                
+
                 # Track usage
                 usage = response.json().get("usage", {})
                 self._total_tokens += usage.get("total_tokens", 0)
-                
+
                 return content
             except requests.exceptions.RequestException as e:
                 last_error = e
                 if attempt < 2:
                     time.sleep(2 ** attempt * 2)
-        
+
         raise RuntimeError(f"AI call failed after 3 retries: {last_error}")
-    
+
     @staticmethod
     def _strip_markdown(text: str) -> str:
         """A3: Strip markdown code fences from AI response."""
@@ -139,7 +140,7 @@ class AIClient:
         if '\n```\n' in stripped:
             stripped = stripped[:stripped.rfind('\n```\n')]
         return stripped.strip()
-    
+
     def transform_code(self, source_code: str, source_type: str = "emr", context: str = "") -> str:
         system = f"""You are an expert migrating {source_type.upper()} code to Databricks. Rules:
 - Unity Catalog 3-level namespace (catalog.schema.table)
@@ -155,34 +156,34 @@ Return ONLY the transformed Python code with NO markdown fences or explanations.
             {"role": "user", "content": f"Transform:\n```python\n{source_code}\n```"}
         ])
         return self._strip_markdown(result)
-    
-    def explain_pipeline(self, pipeline_spec: Dict[str, Any]) -> str:
-        system = """Write a concise pipeline description for business stakeholders. 
+
+    def explain_pipeline(self, pipeline_spec: dict[str, Any]) -> str:
+        system = """Write a concise pipeline description for business stakeholders.
 Include: data flow, purpose, SLA, compliance. Under 150 words."""
         spec_str = json.dumps(pipeline_spec, indent=2) if isinstance(pipeline_spec, dict) else str(pipeline_spec)
         return self._call([
             {"role": "system", "content": system},
             {"role": "user", "content": f"Describe:\n{spec_str}"}
         ])
-    
-    def suggest_quality_rules(self, table_name: str, columns: List[str], domain: str) -> str:
+
+    def suggest_quality_rules(self, table_name: str, columns: list[str], domain: str) -> str:
         system = """Suggest DQ expectations for financial data. Return CONSTRAINT statements only."""
         return self._call([
             {"role": "system", "content": system},
             {"role": "user", "content": f"Table: {table_name}\nColumns: {', '.join(columns)}\nDomain: {domain}"}
         ])
-    
+
     def debug_migration(self, error_message: str, source_code: str, context: str = "") -> str:
         system = """Diagnose migration error. Give: 1) Root cause, 2) Fix code, 3) Prevention tip."""
         return self._call([
             {"role": "system", "content": system},
             {"role": "user", "content": f"Error: {error_message}\nCode:\n```\n{source_code}\n```\nContext: {context}"}
         ])
-    
-    def generate_migration_summary(self, inventory: List[Dict], source_desc: str, dest_desc: str) -> str:
+
+    def generate_migration_summary(self, inventory: list[dict], source_desc: str, dest_desc: str) -> str:
         system = """Write a 200-word executive summary for a regulated financial services migration.
 Focus on: what migrated, improvements gained, risks mitigated, next steps. Use bullets."""
-        inv_summary = json.dumps([{"name": p["name"], "domain": p["domain"], 
+        inv_summary = json.dumps([{"name": p["name"], "domain": p["domain"],
                                     "source_type": p["source_type"],
                                     "classification": p.get("classification", "internal")}
                                    for p in inventory], indent=2)
@@ -190,7 +191,7 @@ Focus on: what migrated, improvements gained, risks mitigated, next steps. Use b
             {"role": "system", "content": system},
             {"role": "user", "content": f"Source: {source_desc}\nDest: {dest_desc}\nPipelines ({len(inventory)}):\n{inv_summary}"}
         ])
-    
+
     def enrich_docs(self, doc_content: str, context: str) -> str:
         system = """Enhance migration docs with risk callouts and recommendations as > blockquotes."""
         return self._call([
@@ -305,11 +306,11 @@ TARGET (Databricks):
 
     def batch_compare(
         self,
-        file_pairs: List[Dict[str, str]],
+        file_pairs: list[dict[str, str]],
         source_type: str = "emr",
         context: str = "",
         threads: int = 1,
-    ) -> List[ComparisonResult]:
+    ) -> list[ComparisonResult]:
         """Compare multiple source→target file pairs.
 
         Args:
@@ -326,7 +327,7 @@ TARGET (Databricks):
         """
         from pathlib import Path
 
-        def _compare_one(pair: Dict[str, str]) -> ComparisonResult:
+        def _compare_one(pair: dict[str, str]) -> ComparisonResult:
             source = Path(pair["source_path"]).read_text()
             target = Path(pair["target_path"]).read_text()
             return self.compare_migration(
@@ -346,13 +347,13 @@ TARGET (Databricks):
             futures = {executor.submit(_compare_one, p): p for p in file_pairs}
             for future in as_completed(futures):
                 results.append(future.result())
-        
+
         # Sort by original order
         name_order = {p.get("name", ""): i for i, p in enumerate(file_pairs)}
         results.sort(key=lambda r: name_order.get(r.pipeline_name, 999))
         return results
 
-    def print_comparison_report(self, results: List[ComparisonResult]) -> str:
+    def print_comparison_report(self, results: list[ComparisonResult]) -> str:
         """Generate a formatted comparison report from batch results."""
         lines = []
         lines.append("═" * 70)

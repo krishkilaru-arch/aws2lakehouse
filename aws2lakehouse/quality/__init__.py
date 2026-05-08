@@ -9,13 +9,31 @@ Provides:
 - Data freshness monitoring
 """
 
-from typing import Dict, List, Optional, Any, Callable
-from dataclasses import dataclass, field
-from enum import Enum
-from datetime import datetime, timedelta
+import json
 import logging
+from dataclasses import dataclass, field
+from datetime import datetime
+from enum import Enum
 
 logger = logging.getLogger(__name__)
+
+__all__ = [
+    "DQRule", "DQResult", "DQFramework", "Severity", "RuleAction",
+    "LineageTracker", "AlertManager", "FreshnessSLAMonitor", "VolumeAnomalyDetector",
+]
+
+
+def _validate_sql_condition(condition: str):
+    """Validate that a SQL condition does not contain dangerous patterns."""
+    import re
+    dangerous = re.compile(
+        r"(--|;|DROP\s|ALTER\s|INSERT\s|UPDATE\s|DELETE\s|GRANT\s|REVOKE\s)",
+        re.IGNORECASE,
+    )
+    if dangerous.search(condition):
+        raise ValueError(
+            f"SQL condition contains potentially dangerous pattern: {condition!r}"
+        )
 
 
 class Severity(Enum):
@@ -41,7 +59,7 @@ class DQRule:
     action: RuleAction = RuleAction.WARN
     severity: Severity = Severity.WARNING
     threshold: float = 1.0  # Percentage of rows that must pass (0-1)
-    tags: List[str] = field(default_factory=list)
+    tags: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -61,10 +79,10 @@ class DQResult:
 class DQFramework:
     """
     Data Quality Framework — Define, validate, and enforce quality rules.
-    
+
     Usage:
         dq = DQFramework(catalog="production")
-        
+
         # Define rules
         dq.add_rule(DQRule(
             name="valid_amount",
@@ -73,7 +91,7 @@ class DQFramework:
             action=RuleAction.QUARANTINE,
             threshold=0.99
         ))
-        
+
         dq.add_rule(DQRule(
             name="not_null_id",
             description="Application ID must not be null",
@@ -81,29 +99,29 @@ class DQFramework:
             action=RuleAction.FAIL,
             threshold=1.0
         ))
-        
+
         # Validate
         results = dq.validate_table("production.lending_bronze.loan_applications")
-        
+
         # Generate SDP expectations
         sql = dq.generate_expectations_sql("loan_applications")
     """
-    
+
     def __init__(self, catalog: str = "production"):
         self.catalog = catalog
-        self.rules: Dict[str, List[DQRule]] = {}  # table -> rules
-        self.results: List[DQResult] = []
-    
+        self.rules: dict[str, list[DQRule]] = {}  # table -> rules
+        self.results: list[DQResult] = []
+
     def add_rule(self, rule: DQRule, table: str = "default"):
         """Add a quality rule for a table."""
         if table not in self.rules:
             self.rules[table] = []
         self.rules[table].append(rule)
-    
-    def add_standard_rules(self, table: str, primary_key: str, required_columns: List[str] = None):
+
+    def add_standard_rules(self, table: str, primary_key: str, required_columns: list[str] = None):
         """Add standard quality rules for a table."""
         required_columns = required_columns or []
-        
+
         # Primary key not null
         self.add_rule(DQRule(
             name=f"{primary_key}_not_null",
@@ -112,17 +130,17 @@ class DQFramework:
             action=RuleAction.FAIL,
             threshold=1.0
         ), table)
-        
-        # Primary key unique
+
+        # Primary key unique (count of dupes = 0)
         self.add_rule(DQRule(
             name=f"{primary_key}_unique",
             description=f"Primary key {primary_key} must be unique",
-            condition=f"{primary_key} IS NOT NULL",  # Uniqueness checked separately
+            condition=f"{primary_key} IS NOT NULL AND {primary_key} NOT IN (SELECT {primary_key} FROM {table} GROUP BY {primary_key} HAVING COUNT(*) > 1)",
             action=RuleAction.DROP,
             threshold=1.0,
             tags=["uniqueness"]
         ), table)
-        
+
         # Required columns not null
         for col in required_columns:
             self.add_rule(DQRule(
@@ -132,30 +150,32 @@ class DQFramework:
                 action=RuleAction.QUARANTINE,
                 threshold=0.99
             ), table)
-    
-    def validate_table(self, table_name: str, spark=None) -> List[DQResult]:
+
+    def validate_table(self, table_name: str, spark=None) -> list[DQResult]:
         """Run all rules against a table and return results."""
         # Find rules for this table
         short_name = table_name.split(".")[-1]
         rules = self.rules.get(short_name, self.rules.get("default", []))
-        
+
         if not rules:
             logger.warning(f"No DQ rules defined for {table_name}")
             return []
-        
+
         results = []
-        
+
         if spark:
             total_rows = spark.table(table_name).count()
-            
+
             for rule in rules:
+                # Validate condition contains only safe SQL patterns
+                _validate_sql_condition(rule.condition)
                 passing = spark.sql(
                     f"SELECT COUNT(*) as cnt FROM {table_name} WHERE {rule.condition}"
                 ).first()[0]
-                
+
                 failing = total_rows - passing
                 pass_rate = passing / total_rows if total_rows > 0 else 1.0
-                
+
                 result = DQResult(
                     rule_name=rule.name,
                     passed=pass_rate >= rule.threshold,
@@ -168,22 +188,22 @@ class DQFramework:
                 )
                 results.append(result)
                 self.results.append(result)
-                
+
                 if not result.passed:
                     logger.warning(
                         f"DQ FAIL: {rule.name} on {table_name} — "
                         f"{result.pass_rate:.1%} < {rule.threshold:.1%} threshold"
                     )
-        
+
         return results
-    
+
     def generate_expectations_sql(self, table: str) -> str:
         """Generate Spark Declarative Pipeline (SDP) expectations SQL."""
         rules = self.rules.get(table, [])
-        
+
         if not rules:
             return f"-- No DQ rules defined for {table}"
-        
+
         expectations = []
         for rule in rules:
             action_map = {
@@ -196,9 +216,9 @@ class DQFramework:
             expectations.append(
                 f"  CONSTRAINT {rule.name} EXPECT ({rule.condition}) ON VIOLATION {action}"
             )
-        
+
         expectations_str = ",\n".join(expectations)
-        
+
         return f"""-- Data Quality Expectations for {table}
 -- Generated by aws2lakehouse DQFramework
 
@@ -207,7 +227,7 @@ CREATE OR REFRESH STREAMING TABLE {self.catalog}.silver.{table} (
 ) AS
 SELECT * FROM STREAM({self.catalog}.bronze.{table});
 """
-    
+
     def generate_monitoring_dashboard_sql(self) -> str:
         """Generate SQL for DQ monitoring dashboard."""
         return f"""-- Data Quality Monitoring Views
@@ -232,14 +252,14 @@ ORDER BY check_timestamp DESC;
 class LineageTracker:
     """
     Data lineage tracking and documentation.
-    
+
     Integrates with Unity Catalog lineage features and provides
     additional custom lineage for cross-system tracking.
     """
-    
+
     def __init__(self, catalog: str = "production"):
         self.catalog = catalog
-    
+
     def generate_lineage_table_sql(self) -> str:
         """Generate lineage tracking table."""
         return f"""-- Custom Lineage Tracking Table
@@ -261,33 +281,41 @@ CREATE TABLE IF NOT EXISTS {self.catalog}.audit.pipeline_lineage (
 USING DELTA
 TBLPROPERTIES ('delta.enableChangeDataFeed' = 'true');
 """
-    
-    def log_lineage(self, spark, pipeline_name: str, source: str, target: str, 
+
+    def log_lineage(self, spark, pipeline_name: str, source: str, target: str,
                     rows_in: int, rows_out: int, job_run_id: str = ""):
-        """Log a lineage record."""
-        spark.sql(f"""
-            INSERT INTO {self.catalog}.audit.pipeline_lineage 
-            (pipeline_name, source_table, target_table, row_count_in, row_count_out, job_run_id)
-            VALUES ('{pipeline_name}', '{source}', '{target}', {rows_in}, {rows_out}, '{job_run_id}')
-        """)
+        """Log a lineage record using parameterized insert."""
+        from pyspark.sql import Row
+        row = Row(
+            pipeline_name=str(pipeline_name),
+            source_table=str(source),
+            target_table=str(target),
+            row_count_in=int(rows_in),
+            row_count_out=int(rows_out),
+            job_run_id=str(job_run_id),
+        )
+        df = spark.createDataFrame([row])
+        df.write.mode("append").saveAsTable(
+            f"{self.catalog}.audit.pipeline_lineage"
+        )
 
 
 class AlertManager:
     """
     Alerting framework for pipeline monitoring.
-    
+
     Alert channels: Email, Slack, PagerDuty
     """
-    
+
     def __init__(self):
-        self.alert_rules: List[Dict] = []
-    
+        self.alert_rules: list[dict] = []
+
     def add_alert(
         self,
         name: str,
         condition: str,
         severity: Severity,
-        channels: List[str],
+        channels: list[str],
         message_template: str = ""
     ):
         """Add an alert rule."""
@@ -298,12 +326,11 @@ class AlertManager:
             "channels": channels,
             "message_template": message_template or f"Alert: {name} triggered"
         })
-    
+
     def generate_alert_config(self) -> str:
         """Generate alert configuration YAML."""
-        import json
         return json.dumps({"alerts": self.alert_rules}, indent=2)
-    
+
     def add_standard_pipeline_alerts(self, pipeline_name: str, owner_email: str):
         """Add standard alerts for a pipeline."""
         self.add_alert(
@@ -333,17 +360,17 @@ class AlertManager:
 class FreshnessSLAMonitor:
     """
     Data Freshness SLA Monitoring.
-    
+
     Detects stale data by checking last ingestion timestamp against SLA thresholds.
     Generates SQL views, alert queries, and monitoring dashboards.
     """
-    
+
     def __init__(self, catalog: str = "production"):
         self.catalog = catalog
-        self.monitored_tables: List[Dict] = []
-    
+        self.monitored_tables: list[dict] = []
+
     def add_table(self, table: str, sla_minutes: int, timestamp_col: str = "_ingested_at",
-                  owner: str = "", alert_channels: List[str] = None):
+                  owner: str = "", alert_channels: list[str] = None):
         """Register a table for freshness monitoring."""
         self.monitored_tables.append({
             "table": table,
@@ -352,12 +379,12 @@ class FreshnessSLAMonitor:
             "owner": owner,
             "alert_channels": alert_channels or [],
         })
-    
+
     def generate_monitoring_view_sql(self, view_name: str = None) -> str:
         """Generate a unified freshness monitoring view."""
         if not self.monitored_tables:
             return "-- No tables registered for monitoring"
-        
+
         view = view_name or f"{self.catalog}.observability.v_freshness_monitor"
         unions = []
         for t in self.monitored_tables:
@@ -368,19 +395,19 @@ class FreshnessSLAMonitor:
     max({t["timestamp_col"]}) as last_ingested,
     current_timestamp() as checked_at,
     TIMESTAMPDIFF(MINUTE, max({t["timestamp_col"]}), current_timestamp()) as staleness_minutes,
-    CASE 
+    CASE
       WHEN TIMESTAMPDIFF(MINUTE, max({t["timestamp_col"]}), current_timestamp()) > {t["sla_minutes"]} THEN 'BREACHED'
       WHEN TIMESTAMPDIFF(MINUTE, max({t["timestamp_col"]}), current_timestamp()) > {t["sla_minutes"]} * 0.8 THEN 'WARNING'
       ELSE 'OK'
     END as sla_status
   FROM {t["table"]}""")
-        
-        sql = f"-- Freshness SLA Monitor\n"
+
+        sql = "-- Freshness SLA Monitor\n"
         sql += f"CREATE OR REPLACE VIEW {view} AS\n"
         sql += "\nUNION ALL\n".join(unions)
         sql += ";"
         return sql
-    
+
     def generate_alert_query(self) -> str:
         """Generate a query that returns only SLA breaches (for alert integration)."""
         view = f"{self.catalog}.observability.v_freshness_monitor"
@@ -396,15 +423,15 @@ ORDER BY breach_minutes DESC;
 class VolumeAnomalyDetector:
     """
     Data Volume Anomaly Detection.
-    
+
     Detects unexpected changes in data volume (too few or too many rows)
     using rolling averages and configurable thresholds.
     """
-    
+
     def __init__(self, catalog: str = "production"):
         self.catalog = catalog
-        self.monitored_tables: List[Dict] = []
-    
+        self.monitored_tables: list[dict] = []
+
     def add_table(self, table: str, timestamp_col: str = "_ingested_at",
                   low_threshold: float = 0.5, high_threshold: float = 2.0,
                   lookback_days: int = 7, granularity: str = "day"):
@@ -417,26 +444,26 @@ class VolumeAnomalyDetector:
             "lookback_days": lookback_days,
             "granularity": granularity,
         })
-    
+
     def generate_anomaly_view_sql(self, view_name: str = None) -> str:
         """Generate volume anomaly detection view."""
         if not self.monitored_tables:
             return "-- No tables registered"
-        
+
         view = view_name or f"{self.catalog}.observability.v_volume_anomalies"
         unions = []
-        
+
         for t in self.monitored_tables:
             low = t["low_threshold"]
             high = t["high_threshold"]
             lookback = t["lookback_days"]
-            
+
             unions.append(f"""  SELECT
     '{t["table"]}' as table_name,
     date({t["timestamp_col"]}) as ingest_date,
     count(*) as row_count,
     avg(count(*)) OVER (
-      ORDER BY date({t["timestamp_col"]}) 
+      ORDER BY date({t["timestamp_col"]})
       ROWS BETWEEN {lookback} PRECEDING AND 1 PRECEDING
     ) as rolling_avg,
     CASE
@@ -452,13 +479,13 @@ class VolumeAnomalyDetector:
   FROM {t["table"]}
   GROUP BY date({t["timestamp_col"]})
   HAVING date({t["timestamp_col"]}) >= current_date() - INTERVAL {lookback + 7} DAYS""")
-        
-        sql = f"-- Volume Anomaly Detection\n"
+
+        sql = "-- Volume Anomaly Detection\n"
         sql += f"CREATE OR REPLACE VIEW {view} AS\n"
         sql += "\nUNION ALL\n".join(unions)
         sql += "\nORDER BY ingest_date DESC;"
         return sql
-    
+
     def generate_alert_query(self) -> str:
         """Generate query for volume anomaly alerts."""
         view = f"{self.catalog}.observability.v_volume_anomalies"

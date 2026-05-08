@@ -3,14 +3,13 @@ Wave Planner — Generates migration waves based on complexity, risk, and depend
 
 Strategies:
 - risk_first: Migrate low-risk pipelines first to build confidence
-- impact_first: Migrate high-impact pipelines first for maximum ROI  
+- impact_first: Migrate high-impact pipelines first for maximum ROI
 - domain_based: Group by business domain for team alignment
 - dependency_based: Respect data dependencies between pipelines
 """
 
-from typing import Dict, List, Optional
-from dataclasses import dataclass, field
 import logging
+from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
@@ -21,62 +20,62 @@ class MigrationWave:
     wave_number: int
     name: str
     description: str
-    pipelines: List[str] = field(default_factory=list)  # pipeline_ids
+    pipelines: list[str] = field(default_factory=list)  # pipeline_ids
     estimated_duration_weeks: float = 2.0
     estimated_effort_hours: float = 0.0
-    dependencies: List[int] = field(default_factory=list)  # wave numbers this depends on
-    validation_criteria: List[str] = field(default_factory=list)
+    dependencies: list[int] = field(default_factory=list)  # wave numbers this depends on
+    validation_criteria: list[str] = field(default_factory=list)
     rollback_plan: str = ""
 
 
 class WavePlanner:
     """
     Generates wave-based migration roadmap.
-    
+
     Usage:
         from aws2lakehouse.discovery import PipelineInventory, WavePlanner
-        
+
         inventory = PipelineInventory()
         inventory.scan_emr_clusters()
-        
+
         planner = WavePlanner(inventory)
         waves = planner.generate_waves(strategy="risk_first", max_per_wave=8)
         planner.export_roadmap("migration_roadmap.json")
     """
-    
+
     def __init__(self, inventory):
         self.inventory = inventory
-        self.waves: List[MigrationWave] = []
-    
+        self.waves: list[MigrationWave] = []
+
     def generate_waves(
-        self, 
+        self,
         strategy: str = "risk_first",
         max_per_wave: int = 8,
         wave_duration_weeks: float = 2.0
-    ) -> List[MigrationWave]:
+    ) -> list[MigrationWave]:
         """
         Generate migration waves.
-        
+
         Args:
             strategy: "risk_first", "impact_first", "domain_based", "dependency_based"
             max_per_wave: Maximum pipelines per wave
             wave_duration_weeks: Target duration per wave
         """
         pipelines = self.inventory.pipelines
-        
+
         if strategy == "risk_first":
             sorted_pipelines = sorted(pipelines, key=lambda p: p.risk_score)
         elif strategy == "impact_first":
             impact_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
             sorted_pipelines = sorted(
-                pipelines, 
+                pipelines,
                 key=lambda p: impact_order.get(p.business_impact.value, 3)
             )
         elif strategy == "domain_based":
             sorted_pipelines = sorted(pipelines, key=lambda p: p.domain)
         else:
             sorted_pipelines = pipelines
-        
+
         # Always start with Wave 0: Pilot
         self.waves = [MigrationWave(
             wave_number=0,
@@ -90,7 +89,7 @@ class WavePlanner:
                 "Rollback procedure tested"
             ]
         )]
-        
+
         # Select pilot pipelines (one of each complexity)
         pilot_ids = set()
         for complexity in ["simple", "medium", "complex"]:
@@ -99,11 +98,11 @@ class WavePlanner:
                     self.waves[0].pipelines.append(p.pipeline_id)
                     pilot_ids.add(p.pipeline_id)
                     break
-        
+
         # Generate remaining waves
         remaining = [p for p in sorted_pipelines if p.pipeline_id not in pilot_ids]
         wave_num = 1
-        
+
         for i in range(0, len(remaining), max_per_wave):
             batch = remaining[i:i + max_per_wave]
             wave = MigrationWave(
@@ -126,14 +125,14 @@ class WavePlanner:
             )
             self.waves.append(wave)
             wave_num += 1
-        
+
         logger.info(f"Generated {len(self.waves)} waves for {len(pipelines)} pipelines")
         return self.waves
-    
+
     def export_roadmap(self, path: str):
         """Export roadmap to JSON."""
         import json
-        
+
         roadmap = {
             "total_waves": len(self.waves),
             "total_pipelines": sum(len(w.pipelines) for w in self.waves),
@@ -152,6 +151,6 @@ class WavePlanner:
                 for w in self.waves
             ]
         }
-        
+
         with open(path, "w") as f:
             json.dump(roadmap, f, indent=2)

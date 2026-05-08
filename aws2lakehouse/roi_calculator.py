@@ -4,8 +4,7 @@ ROI Calculator — Quantifies migration savings and time-to-value.
 Compares AWS (EMR/Glue/Step Functions) costs vs Databricks Lakehouse.
 """
 
-from typing import Dict, List
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass
@@ -15,37 +14,37 @@ class AWSCurrentState:
     emr_clusters: int = 0
     emr_monthly_cost: float = 0.0
     emr_avg_utilization: float = 0.4  # Most EMR clusters are 30-50% utilized
-    
+
     # Glue
     glue_jobs: int = 0
     glue_monthly_dpu_hours: float = 0.0
     glue_monthly_cost: float = 0.0
-    
+
     # Step Functions
     step_function_executions: int = 0
     step_function_monthly_cost: float = 0.0
-    
+
     # S3 storage
     s3_storage_tb: float = 0.0
     s3_monthly_cost: float = 0.0
-    
+
     # Other (Kinesis, Lambda, CloudWatch, etc.)
     other_monthly_cost: float = 0.0
-    
+
     # People cost
     engineers_maintaining: int = 0
     avg_engineer_monthly_cost: float = 15000.0  # Fully loaded
-    
+
     @property
     def total_monthly_infrastructure(self) -> float:
-        return (self.emr_monthly_cost + self.glue_monthly_cost + 
-                self.step_function_monthly_cost + self.s3_monthly_cost + 
+        return (self.emr_monthly_cost + self.glue_monthly_cost +
+                self.step_function_monthly_cost + self.s3_monthly_cost +
                 self.other_monthly_cost)
-    
+
     @property
     def total_monthly_people(self) -> float:
         return self.engineers_maintaining * self.avg_engineer_monthly_cost
-    
+
     @property
     def total_monthly_cost(self) -> float:
         return self.total_monthly_infrastructure + self.total_monthly_people
@@ -58,24 +57,24 @@ class DatabricksProjectedState:
     jobs_dbu_monthly: float = 0.0
     sql_dbu_monthly: float = 0.0
     serverless_monthly: float = 0.0
-    
+
     # Storage (typically cheaper due to Delta optimization)
     storage_tb: float = 0.0
     storage_monthly_cost: float = 0.0
-    
+
     # Platform
     unity_catalog_cost: float = 0.0
-    
+
     # People (typically fewer needed due to automation)
     engineers_needed: int = 0
     avg_engineer_monthly_cost: float = 15000.0
-    
+
     @property
     def total_monthly_infrastructure(self) -> float:
-        return (self.jobs_dbu_monthly + self.sql_dbu_monthly + 
+        return (self.jobs_dbu_monthly + self.sql_dbu_monthly +
                 self.serverless_monthly + self.storage_monthly_cost +
                 self.unity_catalog_cost)
-    
+
     @property
     def total_monthly_cost(self) -> float:
         return self.total_monthly_infrastructure + (self.engineers_needed * self.avg_engineer_monthly_cost)
@@ -83,41 +82,38 @@ class DatabricksProjectedState:
 
 class ROICalculator:
     """Calculate migration ROI and generate executive summary."""
-    
+
     def __init__(self, current: AWSCurrentState, projected: DatabricksProjectedState,
                  migration_cost: float = 0.0, migration_months: int = 6):
         self.current = current
         self.projected = projected
         self.migration_cost = migration_cost
         self.migration_months = migration_months
-    
-    def calculate(self) -> Dict:
+
+    def calculate(self) -> dict:
         """Calculate comprehensive ROI metrics."""
         monthly_savings = self.current.total_monthly_cost - self.projected.total_monthly_cost
         annual_savings = monthly_savings * 12
-        
+
         # Infrastructure savings
         infra_savings = self.current.total_monthly_infrastructure - self.projected.total_monthly_infrastructure
-        
+
         # Photon acceleration (typical 2-3x performance = cost reduction)
         photon_savings = self.current.emr_monthly_cost * 0.4  # ~40% compute reduction with Photon
-        
+
         # Delta Lake storage optimization (typically 30-50% less storage)
         storage_savings = self.current.s3_monthly_cost * 0.35
-        
+
         # People efficiency (automation reduces ops burden)
         people_savings = self.current.total_monthly_people - (self.projected.engineers_needed * self.projected.avg_engineer_monthly_cost)
-        
+
         # Payback period
-        if monthly_savings > 0:
-            payback_months = self.migration_cost / monthly_savings
-        else:
-            payback_months = float('inf')
-        
+        payback_months = self.migration_cost / monthly_savings if monthly_savings > 0 else float('inf')
+
         # 3-year TCO
         tco_current_3yr = self.current.total_monthly_cost * 36
         tco_databricks_3yr = (self.projected.total_monthly_cost * 36) + self.migration_cost
-        
+
         return {
             "summary": {
                 "monthly_savings": monthly_savings,
@@ -152,14 +148,14 @@ class ROICalculator:
                 "Vendor lock-in (mitigated by Delta Lake open format)",
             ],
         }
-    
+
     def generate_executive_summary(self) -> str:
         """Generate text-based executive summary."""
         roi = self.calculate()
         s = roi["summary"]
         b = roi["breakdown"]
         t = roi["tco_comparison"]
-        
+
         return f"""
 ═══════════════════════════════════════════════════════════════
 MIGRATION ROI EXECUTIVE SUMMARY

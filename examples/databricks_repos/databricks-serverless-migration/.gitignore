@@ -1,6 +1,8 @@
 .databricks/
-.bundle/
 __pycache__/
 *.pyc
 .venv/
-.DS_Store
+.env
+.migration_state.json
+.manifest.json
+.inventory.json

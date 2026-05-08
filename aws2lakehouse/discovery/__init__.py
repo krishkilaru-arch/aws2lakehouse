@@ -1,24 +1,29 @@
-from typing import Dict, List, Optional
-import logging
-import ast
-logger = logging.getLogger(__name__)
-
 """Discovery module — Pipeline inventory, analysis, and wave planning."""
-from aws2lakehouse.discovery.pipeline_inventory import PipelineInventory, PipelineRecord, Complexity
-from aws2lakehouse.discovery.complexity_analyzer import ComplexityAnalyzer, ComplexityScore
-from aws2lakehouse.discovery.wave_planner import WavePlanner, MigrationWave
 
+import ast
+import logging
+from typing import Optional
+
+from aws2lakehouse.discovery.complexity_analyzer import ComplexityAnalyzer as ComplexityAnalyzer
+from aws2lakehouse.discovery.complexity_analyzer import ComplexityScore as ComplexityScore
+from aws2lakehouse.discovery.pipeline_inventory import Complexity as Complexity
+from aws2lakehouse.discovery.pipeline_inventory import PipelineInventory as PipelineInventory
+from aws2lakehouse.discovery.pipeline_inventory import PipelineRecord as PipelineRecord
+from aws2lakehouse.discovery.wave_planner import MigrationWave as MigrationWave
+from aws2lakehouse.discovery.wave_planner import WavePlanner as WavePlanner
+
+logger = logging.getLogger(__name__)
 
 
 class LatencyClassifier:
     """Classifies pipelines by data latency requirements."""
-    
+
     BATCH = "batch"           # > 1 hour
     NEAR_REAL_TIME = "nrt"    # 1-60 minutes
     STREAMING = "streaming"   # < 1 minute
-    
+
     @staticmethod
-    def classify(schedule: str = None, processing_time: str = None, 
+    def classify(schedule: str = None, processing_time: str = None,
                  trigger_type: str = None) -> str:
         """Classify latency from schedule/processing characteristics."""
         if trigger_type in ("continuous", "kafka", "kinesis", "change_stream"):
@@ -40,18 +45,18 @@ class LatencyClassifier:
 
 class AirflowScanner:
     """Scans Airflow/MWAA environments for DAG inventory."""
-    
+
     def __init__(self, airflow_url: str = None, dag_folder: str = None):
         self.airflow_url = airflow_url
         self.dag_folder = dag_folder
-        self.dags: List[Dict] = []
-    
-    def scan_dag_folder(self, folder: str = None) -> List[Dict]:
+        self.dags: list[dict] = []
+
+    def scan_dag_folder(self, folder: str = None) -> list[dict]:
         """Scan a folder of Airflow DAG files."""
         import glob
         folder = folder or self.dag_folder or "."
         dag_files = glob.glob(f"{folder}/**/*.py", recursive=True)
-        
+
         for f in dag_files:
             try:
                 with open(f) as fh:
@@ -62,20 +67,20 @@ class AirflowScanner:
                         self.dags.append(dag_info)
             except Exception as e:
                 logger.warning(f"Failed to parse {f}: {e}")
-        
+
         return self.dags
-    
-    def _parse_dag_file(self, filepath: str, source: str) -> Optional[Dict]:
+
+    def _parse_dag_file(self, filepath: str, source: str) -> Optional[dict]:
         """Extract DAG metadata from a Python file."""
         try:
             tree = ast.parse(source)
         except SyntaxError:
             return None
-        
+
         dag_id = None
         schedule = None
         tasks = []
-        
+
         for node in ast.walk(tree):
             if isinstance(node, ast.Call):
                 name = ""
@@ -83,7 +88,7 @@ class AirflowScanner:
                     name = node.func.id
                 elif isinstance(node.func, ast.Attribute):
                     name = node.func.attr
-                
+
                 if name == "DAG":
                     for kw in node.keywords:
                         if kw.arg == "dag_id" and isinstance(kw.value, ast.Constant):
@@ -92,15 +97,15 @@ class AirflowScanner:
                             schedule = kw.value.value
                     if node.args and isinstance(node.args[0], ast.Constant):
                         dag_id = dag_id or node.args[0].value
-                
+
                 if "Operator" in name or "Sensor" in name:
                     for kw in node.keywords:
                         if kw.arg == "task_id" and isinstance(kw.value, ast.Constant):
                             tasks.append({"task_id": kw.value.value, "operator": name})
-        
+
         if not dag_id:
             return None
-        
+
         return {
             "dag_id": dag_id,
             "file": filepath,
@@ -110,14 +115,14 @@ class AirflowScanner:
             "latency": LatencyClassifier.classify(schedule=schedule or ""),
             "operators_used": list(set(t["operator"] for t in tasks)),
         }
-    
-    def scan_airflow_api(self, base_url: str = None) -> List[Dict]:
+
+    def scan_airflow_api(self, base_url: str = None) -> list[dict]:
         """Scan Airflow REST API for DAG metadata (requires connectivity)."""
         url = base_url or self.airflow_url
         if not url:
             logger.warning("No Airflow URL provided")
             return []
-        
+
         try:
             import requests
             resp = requests.get(f"{url}/api/v1/dags", timeout=30)
@@ -133,20 +138,20 @@ class AirflowScanner:
                     })
         except Exception as e:
             logger.warning(f"Airflow API scan failed: {e}")
-        
+
         return self.dags
 
 
 class SnowflakeScanner:
     """Scans Snowflake for table/pipeline metadata."""
-    
+
     def __init__(self, account: str = "", warehouse: str = ""):
         self.account = account
         self.warehouse = warehouse
-        self.tables: List[Dict] = []
-        self.tasks: List[Dict] = []
-    
-    def scan_tables(self, database: str, schema: str = None) -> List[Dict]:
+        self.tables: list[dict] = []
+        self.tasks: list[dict] = []
+
+    def scan_tables(self, database: str, schema: str = None) -> list[dict]:
         """Scan Snowflake INFORMATION_SCHEMA for table metadata."""
         # Generates the SQL needed — actual execution requires snowflake-connector
         query = f"""
@@ -158,18 +163,18 @@ ORDER BY last_altered DESC;
 """
         self.tables.append({"query": query, "database": database, "schema": schema})
         return self.tables
-    
-    def scan_tasks(self, database: str) -> List[Dict]:
+
+    def scan_tasks(self, database: str) -> list[dict]:
         """Scan Snowflake Tasks (scheduled SQL)."""
         query = f"""
-SELECT name, database_name, schema_name, schedule, state, 
+SELECT name, database_name, schema_name, schedule, state,
        definition, predecessors, created_on
 FROM {database}.information_schema.tasks
 WHERE state = 'started';
 """
         self.tasks.append({"query": query, "database": database})
         return self.tasks
-    
+
     def generate_scan_sql(self) -> str:
         """Generate SQL to run in Snowflake for discovery."""
         return """-- Snowflake Discovery Queries
@@ -183,7 +188,7 @@ FROM information_schema.tables WHERE table_type = 'BASE TABLE';
 SHOW TASKS;
 
 -- 3. Recent query patterns (identifies pipelines)
-SELECT query_type, database_name, schema_name, 
+SELECT query_type, database_name, schema_name,
        COUNT(*) as executions, AVG(total_elapsed_time)/1000 as avg_seconds
 FROM snowflake.account_usage.query_history
 WHERE start_time > DATEADD(day, -7, current_timestamp())
@@ -199,17 +204,17 @@ SHOW PIPES;
 
 class MongoDBScanner:
     """Scans MongoDB for collection metadata."""
-    
+
     def __init__(self, connection_uri: str = ""):
         self.uri = connection_uri
-        self.collections: List[Dict] = []
-    
-    def scan_collections(self, database: str) -> List[Dict]:
+        self.collections: list[dict] = []
+
+    def scan_collections(self, database: str) -> list[dict]:
         """Scan MongoDB collections for migration assessment."""
         # Generates the JavaScript needed for mongo shell
         self.collections.append({"database": database, "status": "requires_connection"})
         return self.collections
-    
+
     def generate_scan_script(self, database: str) -> str:
         """Generate mongo shell script for discovery."""
         return f"""// MongoDB Discovery Script
@@ -244,17 +249,17 @@ try {{
 
 class PostgreSQLScanner:
     """Scans PostgreSQL for table/pipeline metadata."""
-    
+
     def __init__(self, connection_string: str = ""):
         self.conn_string = connection_string
-        self.tables: List[Dict] = []
-    
+        self.tables: list[dict] = []
+
     def generate_scan_sql(self) -> str:
         """Generate PostgreSQL discovery SQL."""
         return """-- PostgreSQL Discovery Queries
 
 -- 1. All tables with sizes and row counts
-SELECT schemaname, tablename, 
+SELECT schemaname, tablename,
        pg_size_pretty(pg_total_relation_size(schemaname || '.' || tablename)) as total_size,
        n_live_tup as approx_rows
 FROM pg_stat_user_tables
@@ -278,7 +283,7 @@ WHERE tc.constraint_type = 'FOREIGN KEY';
 SELECT slot_name, plugin, slot_type, active FROM pg_replication_slots;
 
 -- 5. Active connections (identify application patterns)
-SELECT datname, usename, application_name, COUNT(*) 
-FROM pg_stat_activity 
+SELECT datname, usename, application_name, COUNT(*)
+FROM pg_stat_activity
 WHERE state = 'active' GROUP BY 1,2,3 ORDER BY 4 DESC;
 """

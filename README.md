@@ -1,7 +1,7 @@
 # AWS2Lakehouse — Enterprise Migration Accelerator
 
-> **Migrate 1000+ AWS data pipelines to Databricks Lakehouse Platform in weeks, not months.**  
-> Config-driven automation, MNPI-compliant governance, and GenAI assistance for regulated financial services environments.
+> **Accelerate migration of AWS data pipelines to Databricks Lakehouse Platform.**  
+> Config-driven automation, MNPI-compliant governance, and optional GenAI assistance for regulated financial services environments.
 
 ---
 
@@ -34,19 +34,23 @@
 
 ## Executive Summary
 
-AWS2Lakehouse is a **config-driven migration accelerator** that transforms the process of migrating 1000+ data pipelines from AWS (EMR, Glue, Airflow, Step Functions) to Databricks. Instead of manually rewriting each pipeline, you define a YAML specification and the factory engine generates all production artifacts automatically.
+AWS2Lakehouse is a **config-driven migration accelerator** that streamlines the process of migrating AWS data pipelines (EMR, Glue, Airflow, Step Functions) to Databricks. Instead of manually rewriting each pipeline, you define a YAML specification and the factory engine generates production artifacts automatically.
 
-**Key Value Propositions:**
-- **90% reduction in migration effort** — YAML spec → notebook + job + DQ + governance + tests + monitoring
-- **MNPI compliance from day 1** — Column masks, dynamic views, row filters, embargo periods, audit logging
-- **Zero-downtime cutover** — Dual-write, shadow mode, and instant-rollback patterns
-- **Complete observability** — Freshness SLA, volume anomaly detection, 7 pre-built dashboard views
+**Key Capabilities:**
+- **Automated artifact generation** — YAML spec -> notebook + job + DQ + governance + tests + monitoring
+- **MNPI compliance built in** — Column masks, dynamic views, row filters, embargo periods, audit logging
+- **Cutover patterns** — Dual-write, shadow mode, and rollback templates
+- **Observability** — Freshness SLA, volume anomaly detection, pre-built dashboard views
+- **Resume support** — State checkpointing for interrupted migrations
 
-**Proven ROI:**
-- Current AWS spend: ~$431K/month → Projected Databricks: ~$224K/month
-- Annual savings: $2.48M (48% reduction)
-- Migration investment payback: 4.1 months
-- 3-year net savings: $6.6M
+**ROI Estimation (example scenario):**
+
+> The following numbers are illustrative and project-specific.
+> Use the built-in `ROICalculator` to generate estimates for your workload.
+
+- Typical infrastructure savings: 30-50% (Photon + serverless + Delta optimization)
+- Migration effort reduction: significant (automated artifact generation vs manual rewrite)
+- Payback period: varies by workload size and complexity
 
 ---
 
@@ -60,17 +64,23 @@ AWS2Lakehouse is a **config-driven migration accelerator** that transforms the p
 | --- | --- | --- |
 | Dry Run Mode | `--dry-run` | Preview specs without writing artifacts — shows pipeline targets, domains, source types |
 | Parallel AI | `--threads N` | ThreadPoolExecutor for concurrent AI calls (4x speedup on large migrations) |
+| Resume | `--resume` | Resume an interrupted migration — skips completed steps and pipelines |
 | Verbose Logging | `-v` | Detailed parsing output including fallback warnings during inventory build |
+| Subcommands | `scan`, `validate`, `roi`, `compare` | Standalone tools via `aws2lakehouse <cmd>` CLI |
 
 ### Reliability Improvements
 
 | Area | What Changed |
 | --- | --- |
+| State Management | JSON-based checkpointing — resume after failure without re-processing completed pipelines |
+| Per-Pipeline Error Isolation | Factory failures are caught and reported; other pipelines continue |
+| AST-Based Scanning | Python files detected via `ast.parse` (imports + calls) not just path heuristics |
+| Step Function Validation | JSON files validated by structure (`States` + `StartAt`) not just path keywords |
 | AI Retry Logic | Exponential backoff (3 attempts) for 429/503 responses from Foundation Models |
 | Token Management | Auto-estimates token count; truncates large files before sending to avoid context overflow |
 | Code Parsing | Strips markdown fences from AI-generated code output (prevents syntax errors) |
 | DAG Detection | Content-based scanning — finds Airflow DAGs by `DAG()` pattern even in non-standard paths |
-| Error Handling | All bare `except: pass` replaced with `except Exception` + `warnings.warn()` |
+| Error Handling | All bare `except: pass` replaced with `except Exception` + logging |
 | Token Reporting | Prints total tokens used + cost estimate at end of `--ai` run |
 
 ### Factory & Governance
@@ -161,14 +171,17 @@ AWS2Lakehouse is a **config-driven migration accelerator** that transforms the p
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/aws2lakehouse.git
+git clone https://github.com/krishkilaru-arch/aws2lakehouse.git
 cd aws2lakehouse
 
-# Install core dependencies
-pip install -r requirements.txt
-
-# Or install as an editable package
+# Install as a package (recommended)
 pip install -e .
+
+# With dev tools (pytest, ruff, coverage)
+pip install -e ".[dev]"
+
+# Run tests to verify installation
+python -m pytest tests/ -v
 
 # Quick test (dry-run against included sample project)
 python migrate.py --source ./examples/aws_repos/aws-sample-data-project \

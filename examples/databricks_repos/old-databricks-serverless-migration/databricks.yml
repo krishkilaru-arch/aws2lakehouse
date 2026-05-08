@@ -1,0 +1,35 @@
+bundle:
+  name: acme-capital-data-platform
+
+workspace:
+  host: ${var.workspace_host}
+
+variables:
+  workspace_host:
+    description: Databricks workspace URL
+
+targets:
+  dev:
+    mode: development
+    default: true
+    variables:
+      workspace_host: ""
+
+  staging:
+    mode: development
+    variables:
+      workspace_host: ""
+
+  production:
+    mode: production
+    variables:
+      workspace_host: ""
+    run_as:
+      service_principal_name: acme-capital-data-platform-sp
+
+include:
+    - resources/jobs/bronze_to_silver.yml
+    - resources/jobs/silver_to_gold.yml
+    - resources/jobs/silver_transformation.yml
+    - resources/jobs/bronze_ingestion.yml
+    - resources/jobs/gold_aggregation.yml

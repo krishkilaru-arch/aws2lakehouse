@@ -11,12 +11,12 @@ Usage:
     artifacts = factory.generate(spec)
 """
 
-from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
+from typing import Any, Optional
+
 import yaml
-import json
 
 
 class SourceType(Enum):
@@ -53,7 +53,7 @@ class Classification(Enum):
 @dataclass
 class SourceConfig:
     type: SourceType
-    config: Dict[str, Any] = field(default_factory=dict)
+    config: dict[str, Any] = field(default_factory=dict)
     schema_path: Optional[str] = None
     watermark_column: Optional[str] = None
     watermark_delay: str = "10 minutes"
@@ -66,9 +66,9 @@ class TargetConfig:
     table: str = ""
     format: str = "delta"
     mode: TargetMode = TargetMode.BATCH
-    partition_by: List[str] = field(default_factory=list)
-    z_order_by: List[str] = field(default_factory=list)
-    merge_keys: List[str] = field(default_factory=list)
+    partition_by: list[str] = field(default_factory=list)
+    z_order_by: list[str] = field(default_factory=list)
+    merge_keys: list[str] = field(default_factory=list)
     scd_type: int = 1
     soft_delete: bool = False
 
@@ -85,9 +85,9 @@ class QualityRule:
 class GovernanceConfig:
     classification: Classification = Classification.INTERNAL
     embargo_hours: int = 0
-    mnpi_columns: List[str] = field(default_factory=list)
+    mnpi_columns: list[str] = field(default_factory=list)
     row_filter: Optional[str] = None
-    column_masks: Dict[str, str] = field(default_factory=dict)
+    column_masks: dict[str, str] = field(default_factory=dict)
     owner_group: Optional[str] = None
 
 
@@ -112,9 +112,9 @@ class ScheduleConfig:
 
 @dataclass
 class AlertConfig:
-    on_failure: List[str] = field(default_factory=list)
-    on_sla_breach: List[str] = field(default_factory=list)
-    on_success: List[str] = field(default_factory=list)
+    on_failure: list[str] = field(default_factory=list)
+    on_sla_breach: list[str] = field(default_factory=list)
+    on_success: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -128,14 +128,14 @@ class PipelineSpec:
     target: TargetConfig = field(default_factory=TargetConfig)
     transform_sql: Optional[str] = None
     transform_notebook: Optional[str] = None
-    quality: List[QualityRule] = field(default_factory=list)
+    quality: list[QualityRule] = field(default_factory=list)
     governance: GovernanceConfig = field(default_factory=GovernanceConfig)
     compute: ComputeConfig = field(default_factory=ComputeConfig)
     schedule: ScheduleConfig = field(default_factory=ScheduleConfig)
     alerting: AlertConfig = field(default_factory=AlertConfig)
-    tags: Dict[str, str] = field(default_factory=dict)
+    tags: dict[str, str] = field(default_factory=dict)
     layer: str = "bronze"
-    depends_on: List[str] = field(default_factory=list)
+    depends_on: list[str] = field(default_factory=list)
 
     @classmethod
     def from_yaml(cls, path: str) -> "PipelineSpec":
@@ -144,7 +144,12 @@ class PipelineSpec:
         return cls.from_dict(data)
 
     @classmethod
-    def from_dict(cls, data: Dict) -> "PipelineSpec":
+    def from_dict(cls, data: dict) -> "PipelineSpec":
+        if "name" not in data or not data["name"]:
+            raise ValueError(
+                "PipelineSpec requires a 'name' field. "
+                f"Got keys: {list(data.keys())}"
+            )
         spec = cls(name=data["name"], domain=data.get("domain", "default"),
                    owner=data.get("owner", ""), description=data.get("description", ""),
                    layer=data.get("layer", "bronze"), depends_on=data.get("depends_on", []),
@@ -214,7 +219,7 @@ class PipelineArtifacts:
 class PipelineFactory:
     """
     The Migration Factory Engine.
-    
+
     Turns YAML pipeline specs into production Databricks artifacts:
     - Notebook code (Bronze/Silver/Gold patterns)
     - Job YAML (DAB-compatible)
@@ -239,7 +244,7 @@ class PipelineFactory:
         artifacts.monitoring_sql = self._gen_monitoring(spec)
         return artifacts
 
-    def generate_batch(self, specs_dir: str) -> List[PipelineArtifacts]:
+    def generate_batch(self, specs_dir: str) -> list[PipelineArtifacts]:
         """Generate artifacts for all YAML specs in a directory."""
         results = []
         for f in sorted(Path(specs_dir).glob("*.y*ml")):
@@ -250,7 +255,7 @@ class PipelineFactory:
         """Generate source-specific reading code."""
         cfg = spec.source.config
         src_type = spec.source.type
-        
+
         if src_type == SourceType.KAFKA:
             scope = cfg.get("secret_scope", "kafka")
             topic = cfg.get("topic", "events")
@@ -275,7 +280,7 @@ class PipelineFactory:
                 ")",
             ]
             return "\n".join(lines)
-        
+
         elif src_type == SourceType.AUTO_LOADER:
             fmt = cfg.get("format", "json")
             path = cfg.get("path", f"/Volumes/{spec.target.catalog}/raw/{spec.target.table}/")
@@ -296,7 +301,7 @@ class PipelineFactory:
                 ")",
             ]
             return "\n".join(lines)
-        
+
         elif src_type == SourceType.DELTA_SHARE:
             share = cfg.get("share_name", "vendor")
             schema = cfg.get("schema", "data")
@@ -312,7 +317,7 @@ class PipelineFactory:
                 ")",
             ]
             return "\n".join(lines)
-        
+
         elif src_type == SourceType.JDBC:
             scope = cfg.get("secret_scope", "jdbc")
             src_table = cfg.get("source_table", spec.name)
@@ -333,7 +338,7 @@ class PipelineFactory:
                 ")",
             ]
             return "\n".join(lines)
-        
+
         elif src_type == SourceType.MONGODB:
             scope = cfg.get("secret_scope", "mongo")
             db = cfg.get("database", "prod")
@@ -351,23 +356,23 @@ class PipelineFactory:
                 ")",
             ]
             return "\n".join(lines)
-        
+
         elif src_type == SourceType.DELTA_TABLE:
             src_table = cfg.get("source_table", "")
             if spec.target.mode == TargetMode.STREAMING:
                 return f"df = spark.readStream.table(\"{src_table}\")"
             return f"df = spark.table(\"{src_table}\")"
-        
+
         return "# TODO: Implement source\ndf = spark.createDataFrame([], \"placeholder STRING\")"
 
     def _gen_notebook(self, spec: PipelineSpec) -> str:
         """Generate complete notebook code."""
         fqn = f"{spec.target.catalog}.{spec.target.schema}.{spec.target.table}"
         sections = []
-        
+
         # Header
-        sections.append(f"# Databricks notebook source")
-        sections.append(f"# MAGIC %md")
+        sections.append("# Databricks notebook source")
+        sections.append("# MAGIC %md")
         sections.append(f"# MAGIC # {spec.name} - {spec.layer.title()} Layer")
         sections.append(f"# MAGIC **Domain:** {spec.domain} | **Owner:** {spec.owner}")
         sections.append(f"# MAGIC **Target:** `{fqn}` | **Mode:** {spec.target.mode.value}")
@@ -386,13 +391,13 @@ class PipelineFactory:
         sections.append("")
         sections.append("# COMMAND ----------")
         sections.append("")
-        
+
         # Source
         sections.append(self._get_source_code(spec))
         sections.append("")
         sections.append("# COMMAND ----------")
         sections.append("")
-        
+
         # Transform
         if spec.transform_sql:
             sections.append("# SQL Transformation")
@@ -409,7 +414,7 @@ class PipelineFactory:
             sections.append("")
             sections.append("# COMMAND ----------")
             sections.append("")
-        
+
         # Quality
         if spec.quality:
             sections.append("# Data Quality Checks")
@@ -423,7 +428,7 @@ class PipelineFactory:
             sections.append("")
             sections.append("# COMMAND ----------")
             sections.append("")
-        
+
         # Sink
         if spec.target.mode == TargetMode.STREAMING:
             cp = f"/Volumes/{spec.target.catalog}/{spec.target.schema}/_checkpoints/{spec.target.table}"
@@ -460,17 +465,17 @@ class PipelineFactory:
                 write_line += f".partitionBy({parts})"
             write_line += ".saveAsTable(TARGET_TABLE)"
             sections.append(write_line)
-        
+
         sections.append("")
         sections.append("# COMMAND ----------")
-        
+
         # Optimize
         if spec.target.z_order_by:
             z = ", ".join(spec.target.z_order_by)
             sections.append(f"spark.sql(f\"OPTIMIZE {{TARGET_TABLE}} ZORDER BY ({z})\")")
-        
+
         sections.append(f"print(f\"Pipeline {spec.name} complete -> {{TARGET_TABLE}}\")")
-        
+
         return "\n".join(sections)
 
     def _gen_job_yaml(self, spec: PipelineSpec) -> str:
@@ -479,7 +484,7 @@ class PipelineFactory:
         if spec.schedule.cron:
             quartz = self._to_quartz(spec.schedule.cron)
             sched = f"\n  schedule:\n    quartz_cron_expression: \"{quartz}\"\n    timezone_id: \"{spec.schedule.timezone}\"\n    pause_status: UNPAUSED"
-        
+
         return f"""resources:
   jobs:
     {spec.name}:
@@ -514,17 +519,17 @@ class PipelineFactory:
 
     def _gen_governance_sql(self, spec: PipelineSpec) -> str:
         """Generate governance SQL: tags, column masks, row filters.
-        
+
         F6: Infers column type from mask expression to generate correct function signature.
         """
         fqn = f"{spec.target.catalog}.{spec.target.schema}.{spec.target.table}"
         stmts = [f"-- Governance: {spec.name}"]
         stmts.append(f"ALTER TABLE {fqn} SET TAGS ('data_classification' = '{spec.governance.classification.value}');")
         stmts.append(f"ALTER TABLE {fqn} SET TAGS ('domain' = '{spec.domain}', 'owner' = '{spec.owner}');")
-        
+
         for col in spec.governance.mnpi_columns:
             stmts.append(f"ALTER TABLE {fqn} ALTER COLUMN {col} SET TAGS ('mnpi' = 'true');")
-        
+
         for col, mask_expr in spec.governance.column_masks.items():
             fn = f"{spec.target.catalog}.{spec.target.schema}.mask_{spec.target.table}_{col}"
             group = spec.governance.owner_group or "mnpi_approved"
@@ -533,14 +538,14 @@ class PipelineFactory:
             stmts.append(f"CREATE OR REPLACE FUNCTION {fn}(val {col_type}) RETURNS {col_type}")
             stmts.append(f"  RETURN CASE WHEN is_account_group_member('{group}') THEN val ELSE {mask_expr} END;")
             stmts.append(f"ALTER TABLE {fqn} ALTER COLUMN {col} SET MASK {fn};")
-        
+
         if spec.governance.row_filter:
             fn = f"{spec.target.catalog}.{spec.target.schema}.filter_{spec.target.table}"
             group = spec.governance.owner_group or "mnpi_approved"
             stmts.append(f"CREATE OR REPLACE FUNCTION {fn}() RETURNS BOOLEAN")
             stmts.append(f"  RETURN CASE WHEN is_account_group_member('{group}') THEN TRUE ELSE {spec.governance.row_filter} END;")
             stmts.append(f"ALTER TABLE {fqn} SET ROW FILTER {fn} ON ();")
-        
+
         return "\n".join(stmts)
 
     def _gen_tests(self, spec: PipelineSpec) -> str:
@@ -549,31 +554,31 @@ class PipelineFactory:
         sla = spec.schedule.sla_minutes or 1440
         merge_keys = spec.target.merge_keys or []
         lines = [f"# Tests for {spec.name}",
-                 f"def test_table_exists(spark):",
+                 "def test_table_exists(spark):",
                  f"    assert spark.catalog.tableExists(\"{fqn}\")",
-                 f"",]
-        
+                 "",]
+
         # F5: Only generate null-key test when merge_keys are defined
         if merge_keys:
             lines.extend([
-                 f"def test_no_null_keys(spark):",
+                 "def test_no_null_keys(spark):",
                  f"    df = spark.table(\"{fqn}\")",
                  f"    for key in {merge_keys}:",
-                 f"        assert df.filter(f\"{{key}} IS NULL\").count() == 0",
-                 f"",])
-        
+                 "        assert df.filter(f\"{key} IS NULL\").count() == 0",
+                 "",])
+
         lines.extend([
-                 f"def test_freshness(spark):",
-                 f"    from pyspark.sql.functions import max as smax",
-                 f"    from datetime import datetime, timedelta",
+                 "def test_freshness(spark):",
+                 "    from pyspark.sql.functions import max as smax",
+                 "    from datetime import datetime, timedelta",
                  f"    latest = spark.table(\"{fqn}\").agg(smax(\"_ingested_at\")).collect()[0][0]",
                  f"    assert datetime.now() - latest < timedelta(minutes={sla})",
                  ])
         for r in spec.quality:
-            lines.append(f"")
+            lines.append("")
             lines.append(f"def test_dq_{r.name}(spark):")
             lines.append(f"    df = spark.table(\"{fqn}\")")
-            lines.append(f"    total = df.count()")
+            lines.append("    total = df.count()")
             lines.append(f"    passing = df.filter(\"{r.condition}\").count()")
             lines.append(f"    assert passing / max(total, 1) >= {r.threshold}")
         return "\n".join(lines)
@@ -603,7 +608,7 @@ FROM {fqn} GROUP BY 1 ORDER BY 1 DESC LIMIT 14;
     @staticmethod
     def _infer_mask_type(mask_expr: str) -> str:
         """F6: Infer SQL type from mask expression for column mask functions.
-        
+
         Examples:
             "0.00" → DOUBLE
             "0" → BIGINT
@@ -624,21 +629,31 @@ FROM {fqn} GROUP BY 1 ORDER BY 1 DESC LIMIT 14;
             return "BOOLEAN"
         # Default to STRING for safety (works with most types via implicit cast)
         return "STRING"
-    
+
     @staticmethod
     def _to_quartz(cron_expr: str) -> str:
         """Convert 5-field cron to 7-field Quartz.
-        
+
         Quartz requires exactly one of day-of-month or day-of-week to be '?'.
+        Also converts cron DOW values (0-6, Sun=0) to Quartz (1-7, Sun=1).
         F4: Properly handles when both DOW and DOM are specified.
         """
         parts = cron_expr.split()
         if len(parts) == 5:
             minute, hour, dom, month, dow = parts
-            
+
+            # Convert cron DOW (0-6, Sun=0) to Quartz (1-7, Sun=1)
+            if dow != "*" and dow != "?":
+                # Handle numeric DOW values
+                try:
+                    dow_int = int(dow)
+                    dow = str(dow_int + 1)  # cron 0=Sun -> Quartz 1=Sun
+                except ValueError:
+                    pass  # Named days (MON, TUE) are the same in Quartz
+
             # Quartz mutual exclusion: one of DOM/DOW must be "?"
             if dow != "*" and dom != "*":
-                # Both specified — DOW takes precedence, DOM becomes "?"
+                # Both specified -- DOW takes precedence, DOM becomes "?"
                 dom = "?"
             elif dow != "*":
                 # DOW specified, DOM must be "?"
@@ -647,9 +662,9 @@ FROM {fqn} GROUP BY 1 ORDER BY 1 DESC LIMIT 14;
                 # DOM specified, DOW must be "?"
                 dow = "?"
             else:
-                # Both are "*" — default: use DOM=*, DOW=?
+                # Both are "*" -- default: use DOM=*, DOW=?
                 dow = "?"
-            
+
             return f"0 {minute} {hour} {dom} {month} {dow} *"
         return cron_expr
 

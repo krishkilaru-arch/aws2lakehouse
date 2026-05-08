@@ -1,0 +1,85 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aws2lakehouse"
+version = "2.1.0"
+description = "Enterprise accelerator for migrating AWS EMR, Glue, and Step Functions to Databricks Lakehouse"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [{name = "Lumenalta", email = "krish.kilaru@lumenalta.com"}]
+requires-python = ">=3.9"
+dependencies = [
+    "pyyaml>=6.0",
+    "requests>=2.28",
+]
+
+[project.optional-dependencies]
+aws = ["boto3>=1.28"]
+agent = ["anthropic>=0.39.0"]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "ruff>=0.1.0",
+]
+databricks = ["databricks-sdk>=0.20"]
+all = ["boto3>=1.28", "anthropic>=0.39.0", "databricks-sdk>=0.20"]
+
+[project.scripts]
+aws2lakehouse = "aws2lakehouse.cli:main"
+
+[project.urls]
+Repository = "https://github.com/krishkilaru-arch/aws2lakehouse"
+
+[tool.setuptools.packages.find]
+include = ["aws2lakehouse*"]
+
+# ── pytest ──────────────────────────────────────────────────────────────────
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-v",
+    "--strict-markers",
+    "--tb=short",
+]
+markers = [
+    "integration: marks tests that need AWS or Databricks credentials",
+    "slow: marks tests that take >10s",
+]
+
+# ── coverage ────────────────────────────────────────────────────────────────
+[tool.coverage.run]
+source = ["aws2lakehouse"]
+omit = ["tests/*", "examples/*"]
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 60
+
+# ── ruff ────────────────────────────────────────────────────────────────────
+[tool.ruff]
+target-version = "py39"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+ignore = ["E501"]  # long lines are unavoidable in embedded SQL/YAML templates
+
+[tool.ruff.lint.per-file-ignores]
+"aws2lakehouse/orchestration/airflow_converter.py" = ["E741"]  # 'l' in loop
+"aws2lakehouse/genai/ai_client.py" = ["B904"]  # raise from pattern in notebook env
+"aws2lakehouse/discovery/complexity_analyzer.py" = ["E701", "E702", "E741"]  # compact one-liners
+"migrate.py" = ["SIM105"]  # try/except/pass is intentional for resume
+
+# ── mypy ────────────────────────────────────────────────────────────────────
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+ignore_missing_imports = true
+

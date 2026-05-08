@@ -5,13 +5,11 @@ Pre-built SQL dashboard views, idempotent pipeline patterns,
 checkpointing utilities, and operational monitoring.
 """
 
-from typing import Dict, List
-
 
 class MonitoringDashboard:
     """
     Pre-built SQL views for a Pipeline Health monitoring dashboard.
-    
+
     Creates a unified observability layer with:
     - Pipeline execution history
     - Freshness SLA tracking
@@ -20,12 +18,12 @@ class MonitoringDashboard:
     - Cost tracking
     - Lineage summary
     """
-    
+
     def __init__(self, catalog: str = "production", schema: str = "observability"):
         self.catalog = catalog
         self.schema = schema
         self.fqn = f"{catalog}.{schema}"
-    
+
     def generate_all_sql(self) -> str:
         """Generate complete monitoring dashboard SQL."""
         sections = [
@@ -39,7 +37,7 @@ class MonitoringDashboard:
             self._sla_summary_view(),
         ]
         return "\n\n".join(sections)
-    
+
     def _schema_setup(self) -> str:
         return f"""-- ═══════════════════════════════════════════════════════════════
 -- OBSERVABILITY SCHEMA SETUP
@@ -47,7 +45,7 @@ class MonitoringDashboard:
 CREATE SCHEMA IF NOT EXISTS {self.fqn};
 USE SCHEMA {self.fqn};
 """
-    
+
     def _execution_history_table(self) -> str:
         return f"""-- Pipeline Execution History (append after each run)
 CREATE TABLE IF NOT EXISTS {self.fqn}.pipeline_executions (
@@ -76,7 +74,7 @@ TBLPROPERTIES (
   'quality.pipeline' = 'observability'
 );
 """
-    
+
     def _freshness_view(self) -> str:
         return f"""-- Freshness Monitor View (check table staleness)
 CREATE OR REPLACE VIEW {self.fqn}.v_freshness_status AS
@@ -100,7 +98,7 @@ SELECT *,
   END as health_status
 FROM table_freshness;
 """
-    
+
     def _volume_view(self) -> str:
         return f"""-- Volume Anomaly View (detect unexpected row count changes)
 CREATE OR REPLACE VIEW {self.fqn}.v_volume_anomalies AS
@@ -130,7 +128,7 @@ FROM {self.fqn}.pipeline_executions
 WHERE status = 'SUCCESS'
   AND started_at >= current_date() - INTERVAL 30 DAYS;
 """
-    
+
     def _dq_scores_view(self) -> str:
         return f"""-- Data Quality Scores (daily quality trending)
 CREATE OR REPLACE VIEW {self.fqn}.v_dq_scores AS
@@ -148,7 +146,7 @@ FROM {self.fqn}.pipeline_executions
 WHERE started_at >= current_date() - INTERVAL 30 DAYS
 GROUP BY pipeline_name, domain, date(started_at);
 """
-    
+
     def _pipeline_health_view(self) -> str:
         return f"""-- Pipeline Health Summary (executive dashboard)
 CREATE OR REPLACE VIEW {self.fqn}.v_pipeline_health AS
@@ -158,7 +156,7 @@ SELECT
   COUNT(CASE WHEN latest_status = 'SUCCESS' THEN 1 END) as healthy,
   COUNT(CASE WHEN latest_status = 'FAILED' THEN 1 END) as failing,
   ROUND(
-    COUNT(CASE WHEN latest_status = 'SUCCESS' THEN 1 END) * 100.0 / 
+    COUNT(CASE WHEN latest_status = 'SUCCESS' THEN 1 END) * 100.0 /
     NULLIF(COUNT(DISTINCT pipeline_name), 0), 1
   ) as health_pct
 FROM (
@@ -169,7 +167,7 @@ FROM (
 )
 GROUP BY domain;
 """
-    
+
     def _cost_tracking_view(self) -> str:
         return f"""-- Cost Tracking (DBU consumption by pipeline)
 CREATE OR REPLACE VIEW {self.fqn}.v_cost_by_pipeline AS
@@ -187,7 +185,7 @@ WHERE started_at >= current_date() - INTERVAL 30 DAYS
 GROUP BY pipeline_name, domain, layer, date(started_at)
 ORDER BY total_dbu_cost DESC;
 """
-    
+
     def _sla_summary_view(self) -> str:
         return f"""-- SLA Compliance Summary
 CREATE OR REPLACE VIEW {self.fqn}.v_sla_compliance AS
@@ -208,7 +206,7 @@ GROUP BY domain;
 
 class IdempotentPatterns:
     """Idempotent pipeline design patterns for safe re-runs."""
-    
+
     @staticmethod
     def generate_merge_pattern(target_table: str, merge_keys: list, partition_col: str = None) -> str:
         """Generate idempotent merge/upsert pattern."""
@@ -229,7 +227,7 @@ ON {key_condition}{part_filter}
 WHEN MATCHED THEN UPDATE SET *
 WHEN NOT MATCHED THEN INSERT *;
 """
-    
+
     @staticmethod
     def generate_overwrite_partition_pattern(target_table: str, partition_col: str) -> str:
         """Generate idempotent partition overwrite pattern."""
@@ -239,7 +237,7 @@ WHEN NOT MATCHED THEN INSERT *;
 --   .option("replaceWhere", "{partition_col} = '<value>'")
 --   .saveAsTable("{target_table}")
 """
-    
+
     @staticmethod
     def generate_checkpoint_pattern(pipeline_name: str, catalog: str = "production") -> str:
         """Generate watermark/checkpoint pattern for incremental loads."""
@@ -259,17 +257,17 @@ WHEN NOT MATCHED THEN INSERT *;
 
 class PartitionStrategy:
     """Recommends partitioning and Z-ordering strategies."""
-    
+
     @staticmethod
-    def recommend(table_size_gb: float, query_patterns: List[str],
-                  cardinality: Dict[str, int]) -> Dict:
+    def recommend(table_size_gb: float, query_patterns: list[str],
+                  cardinality: dict[str, int]) -> dict:
         """Recommend partition and Z-order strategy."""
         recommendation = {
             "partition_by": [],
             "z_order_by": [],
             "reasoning": [],
         }
-        
+
         # Partition: only for large tables, low-cardinality columns
         if table_size_gb > 100:
             for col, card in sorted(cardinality.items(), key=lambda x: x[1]):
@@ -278,15 +276,15 @@ class PartitionStrategy:
                     recommendation["reasoning"].append(
                         f"Partition by {col} (cardinality={card}, table={table_size_gb}GB)")
                     break  # Usually 1 partition column
-        
+
         # Z-order: high-cardinality columns used in filters
         for col, card in sorted(cardinality.items(), key=lambda x: -x[1]):
             if card > 1000 and any(col in q for q in query_patterns):
                 recommendation["z_order_by"].append(col)
                 if len(recommendation["z_order_by"]) >= 3:
                     break
-        
+
         if not recommendation["z_order_by"]:
             recommendation["reasoning"].append("No Z-ORDER columns identified; add frequently filtered high-cardinality columns")
-        
+
         return recommendation

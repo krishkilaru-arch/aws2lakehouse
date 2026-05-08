@@ -1,14 +1,15 @@
 """Configuration management for aws2lakehouse."""
 
+import copy
 import os
+from typing import Any, Optional
+
 import yaml
-from typing import Dict, Any, Optional
-from pathlib import Path
 
 
 class Config:
     """Centralized configuration management."""
-    
+
     DEFAULT_CONFIG = {
         "target_catalog": "production",
         "environments": {
@@ -33,14 +34,15 @@ class Config:
             "backup_before_migrate": True,
         },
     }
-    
+
     def __init__(self, config_path: Optional[str] = None):
-        self.config = self.DEFAULT_CONFIG.copy()
+        self.config = copy.deepcopy(self.DEFAULT_CONFIG)
         if config_path and os.path.exists(config_path):
-            with open(config_path, "r") as f:
+            with open(config_path, encoding="utf-8") as f:
                 user_config = yaml.safe_load(f)
-                self._deep_merge(self.config, user_config)
-    
+                if user_config:
+                    self._deep_merge(self.config, user_config)
+
     def get(self, key: str, default=None) -> Any:
         """Get config value using dot notation (e.g., 'compute.default_spark_version')."""
         keys = key.split(".")
@@ -53,8 +55,8 @@ class Config:
             if value is None:
                 return default
         return value
-    
-    def _deep_merge(self, base: Dict, override: Dict):
+
+    def _deep_merge(self, base: dict, override: dict):
         """Deep merge override into base dict."""
         for key, value in override.items():
             if key in base and isinstance(base[key], dict) and isinstance(value, dict):

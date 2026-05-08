@@ -1,0 +1,1851 @@
+Metadata-Version: 2.4
+Name: aws2lakehouse
+Version: 2.1.0
+Summary: Enterprise accelerator for migrating AWS EMR, Glue, and Step Functions to Databricks Lakehouse
+Author-email: Lumenalta <krish.kilaru@lumenalta.com>
+License: MIT
+Project-URL: Repository, https://github.com/krishkilaru-arch/aws2lakehouse
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+Requires-Dist: pyyaml>=6.0
+Requires-Dist: requests>=2.28
+Provides-Extra: aws
+Requires-Dist: boto3>=1.28; extra == "aws"
+Provides-Extra: dev
+Requires-Dist: pytest>=7.0; extra == "dev"
+Requires-Dist: pytest-cov>=4.0; extra == "dev"
+Requires-Dist: ruff>=0.1.0; extra == "dev"
+Provides-Extra: databricks
+Requires-Dist: databricks-sdk>=0.20; extra == "databricks"
+
+# AWS2Lakehouse — Enterprise Migration Accelerator
+
+> **Migrate 1000+ AWS data pipelines to Databricks Lakehouse Platform in weeks, not months.**  
+> Config-driven automation, MNPI-compliant governance, and GenAI assistance for regulated financial services environments.
+
+---
+
+## Table of Contents
+
+1. [Executive Summary](#executive-summary)
+2. [What's New in v2.1](#whats-new-in-v21)
+3. [Architecture Overview](#architecture-overview)
+4. [Installation & Setup](#installation--setup)
+5. [5-Minute Quick Start](#5-minute-quick-start)
+6. [One-Command Migration CLI](#one-command-migration-cli)
+7. [AI-Powered Migration (Foundation Models)](#ai-powered-migration-foundation-models)
+8. [The Migration Factory (Core Engine)](#the-migration-factory-core-engine)
+9. [SpecGenerator (Zero-YAML Pipeline Specs)](#specgenerator-zero-yaml-pipeline-specs)
+10. [Module-by-Module Usage Guide](#module-by-module-usage-guide)
+11. [End-to-End Migration Workflow](#end-to-end-migration-workflow)
+12. [Governance & MNPI Compliance](#governance--mnpi-compliance)
+13. [Orchestration Templates](#orchestration-templates)
+14. [Testing & Validation](#testing--validation)
+15. [Cutover & Hypercare](#cutover--hypercare)
+16. [ROI Calculator](#roi-calculator)
+17. [Robustness & Reliability](#robustness--reliability)
+18. [Wave Planning Dashboard](#wave-planning-dashboard)
+19. [Repository Structure](#repository-structure)
+20. [Sample Project: End-to-End Demo](#sample-project-end-to-end-demo)
+21. [Documentation Index](#documentation-index)
+22. [Appendix: YAML Spec Reference](#appendix-yaml-spec-reference)
+
+---
+
+## Executive Summary
+
+AWS2Lakehouse is a **config-driven migration accelerator** that transforms the process of migrating 1000+ data pipelines from AWS (EMR, Glue, Airflow, Step Functions) to Databricks. Instead of manually rewriting each pipeline, you define a YAML specification and the factory engine generates all production artifacts automatically.
+
+**Key Value Propositions:**
+- **90% reduction in migration effort** — YAML spec → notebook + job + DQ + governance + tests + monitoring
+- **MNPI compliance from day 1** — Column masks, dynamic views, row filters, embargo periods, audit logging
+- **Zero-downtime cutover** — Dual-write, shadow mode, and instant-rollback patterns
+- **Complete observability** — Freshness SLA, volume anomaly detection, 7 pre-built dashboard views
+
+**Proven ROI:**
+- Current AWS spend: ~$431K/month → Projected Databricks: ~$224K/month
+- Annual savings: $2.48M (48% reduction)
+- Migration investment payback: 4.1 months
+- 3-year net savings: $6.6M
+
+---
+
+## What's New in v2.1
+
+> Release following comprehensive code review (26 issues identified and resolved).
+
+### New CLI Features
+
+| Feature | Flag | Description |
+| --- | --- | --- |
+| Dry Run Mode | `--dry-run` | Preview specs without writing artifacts — shows pipeline targets, domains, source types |
+| Parallel AI | `--threads N` | ThreadPoolExecutor for concurrent AI calls (4x speedup on large migrations) |
+| Verbose Logging | `-v` | Detailed parsing output including fallback warnings during inventory build |
+
+### Reliability Improvements
+
+| Area | What Changed |
+| --- | --- |
+| AI Retry Logic | Exponential backoff (3 attempts) for 429/503 responses from Foundation Models |
+| Token Management | Auto-estimates token count; truncates large files before sending to avoid context overflow |
+| Code Parsing | Strips markdown fences from AI-generated code output (prevents syntax errors) |
+| DAG Detection | Content-based scanning — finds Airflow DAGs by `DAG()` pattern even in non-standard paths |
+| Error Handling | All bare `except: pass` replaced with `except Exception` + `warnings.warn()` |
+| Token Reporting | Prints total tokens used + cost estimate at end of `--ai` run |
+
+### Factory & Governance
+
+| Area | What Changed |
+| --- | --- |
+| Streaming Writes | Fixed method chain syntax for `.writeStream` (was broken by parenthesization) |
+| DQ SQL | Empty quality rules now produce a SQL comment instead of 0-byte file |
+| Quartz Cron | `_to_quartz()` handles DOW+DOM mutual exclusion per Quartz spec |
+| Column Masks | Type-aware: `_infer_mask_type()` maps mask expressions to correct SQL types (STRING/DOUBLE/BIGINT/BOOLEAN) |
+| Merge Tests | `test_no_null_keys` only generated when `merge_keys` exist on the spec |
+| Step Counter | Dynamic `[8/8]` vs `[8/9]` based on whether `--ai` is enabled |
+
+### SpecGenerator & Documentation
+
+| Area | What Changed |
+| --- | --- |
+| `from_spark_table()` | New method — reads live table metadata via `DESCRIBE` SQL and generates a spec |
+| `pk_column` | Inventory dict field now overrides naive primary key heuristic |
+| Domain Extraction | `_extract_domain()` accepts custom keyword→domain mapping (18 defaults) |
+| Risk Profile | Correctly counts overlapping MNPI+PII columns (was double-counting) |
+| Frequency Bucketing | Robust cron parser replaces fragile string matching |
+| Wave Planning | Sorts by complexity: simple→Pilot, medium→Wave 1, critical→Wave 1 (not Pilot) |
+| Runbook | Covers ALL pipelines grouped by domain (was truncated at 5) |
+| Cron Regex | `*/1` no longer false-matches `*/10` or `*/15` |
+
+
+## Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│                        AWS2LAKEHOUSE ACCELERATOR (v2.0)                               │
+├─────────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                       │
+│  ╔══════════════════════════════════════════════════════════════════════════════════╗ │
+│  ║                         DISCOVERY & ASSESSMENT                                  ║ │
+│  ║  Scanners (EMR/Glue/Airflow/SF/Mongo/PG) → Complexity Scoring → Wave Planning  ║ │
+│  ║  Dependency Graph → Latency Classification → Stakeholder Templates              ║ │
+│  ╚══════════════════════════════════════════════════════════════════════════════════╝ │
+│                                      │                                                │
+│                                      ▼                                                │
+│  ╔══════════════════════════════════════════════════════════════════════════════════╗ │
+│  ║                     MIGRATION FACTORY (CORE ENGINE)                              ║ │
+│  ║                                                                                  ║ │
+│  ║     YAML Spec ──→ ┌─────────────┐ ──→ Notebook Code (Bronze/Silver/Gold)       ║ │
+│  ║                    │  Pipeline   │ ──→ Job YAML (DAB-compatible)                 ║ │
+│  ║                    │  Factory    │ ──→ Data Quality SQL (SDP expectations)       ║ │
+│  ║                    │             │ ──→ Governance SQL (masks + filters + tags)   ║ │
+│  ║                    │  .generate()│ ──→ Test Code (pytest validation)             ║ │
+│  ║                    │             │ ──→ Monitoring SQL (freshness + volume)       ║ │
+│  ║                    └─────────────┘                                               ║ │
+│  ╚══════════════════════════════════════════════════════════════════════════════════╝ │
+│                                      │                                                │
+│                                      ▼                                                │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌────────────────────────┐  │
+│  │  Ingestion   │  │  Governance  │  │ Orchestration│  │    Observability       │  │
+│  │              │  │              │  │              │  │                        │  │
+│  │ • AutoLoader │  │ • Column Mask│  │ • StepFuncs  │  │ • Freshness SLA        │  │
+│  │ • Kafka      │  │ • Row Filter │  │ • Airflow    │  │ • Volume Anomaly       │  │
+│  │ • Delta Share│  │ • Dynamic Vw │  │ • Multi-task │  │ • 7 Dashboard Views    │  │
+│  │ • JDBC       │  │ • Audit Log  │  │ • For-each   │  │ • Idempotent Patterns  │  │
+│  │ • MongoDB    │  │ • MNPI Ctrl  │  │ • Conditional│  │ • Partition Strategy   │  │
+│  │ • Snowflake  │  │ • Embargo    │  │ • Backfill   │  │ • Alerting             │  │
+│  └──────────────┘  └──────────────┘  └──────────────┘  └────────────────────────┘  │
+│                                                                                       │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌────────────────────────┐  │
+│  │   Compute    │  │    CI/CD     │  │    GenAI     │  │   Bootstrap + ROI      │  │
+│  │              │  │              │  │              │  │                        │  │
+│  │ • 141 types  │  │ • DABs       │  │ • NL → YAML │  │ • One-Click Setup      │  │
+│  │ • Photon 2-3x│  │ • GitHub Act │  │ • Debug Asst │  │ • ROI Calculator       │  │
+│  │ • Serverless │  │ • Azure DevOp│  │ • Lineage AI │  │ • Executive Summary    │  │
+│  │ • Spot/Auto  │  │ • PR Template│  │ • Heuristic  │  │ • Wave Dashboard       │  │
+│  └──────────────┘  └──────────────┘  └──────────────┘  └────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Installation & Setup
+
+### Prerequisites
+- Databricks workspace with Unity Catalog enabled
+- Python 3.9+
+- AWS credentials (optional — for scanning live EMR/Glue/S3 resources)
+- `DATABRICKS_HOST` + `DATABRICKS_TOKEN` environment variables (for `--ai` flag)
+
+### Install
+
+```bash
+# Clone the repository
+git clone https://github.com/your-org/aws2lakehouse.git
+cd aws2lakehouse
+
+# Install core dependencies
+pip install -r requirements.txt
+
+# Or install as an editable package
+pip install -e .
+
+# Quick test (dry-run against included sample project)
+python migrate.py --source ./examples/aws_repos/aws-sample-data-project \
+                  --dest /tmp/test-output --dry-run
+```
+
+### One-Click Platform Bootstrap
+
+Before running migrations, set up the governance foundation. This creates all catalogs, schemas, audit tables, monitoring tables, and grants in a single execution:
+
+```python
+from aws2lakehouse.bootstrap import Bootstrap
+
+# Configure for your organization
+bootstrap = Bootstrap(
+    org="acme",
+    domains=["risk", "lending", "compliance", "customer", "analytics"],
+    environments=["dev", "staging", "production"],
+    admin_group="data_platform_admins"
+)
+
+# Generate all SQL (run in a SQL Warehouse with admin privileges)
+sql = bootstrap.generate_all()
+print(sql)  # Review, then execute
+
+# Or generate as a Databricks notebook
+notebook = bootstrap.generate_notebook()
+```
+
+**What Bootstrap Creates:**
+- Catalogs: `acme_dev`, `acme_staging`, `acme` (production)
+- Schemas: `{domain}_bronze`, `{domain}_silver`, `{domain}_gold` per domain
+- `governance` schema: audit_log (7-year retention), mnpi_registry
+- `monitoring` schema: freshness_metrics, volume_metrics, dq_scores, pipeline_runs
+- `migration_tracking` schema: pipeline_inventory, wave_config, migration_progress
+- Grants for admin group
+
+---
+
+## 5-Minute Quick Start
+
+### Step 1: Define Your Pipeline as YAML
+
+```yaml
+# specs/trade_events.yaml
+name: trade_events
+domain: risk
+source:
+  type: kafka
+  config:
+    topic: trade-events
+    secret_scope: kafka-prod
+target:
+  catalog: production
+  schema: risk_bronze
+  table: trade_events
+  mode: streaming
+  partition_by: [trade_date]
+quality:
+  - name: valid_trade_id
+    condition: "trade_id IS NOT NULL"
+    action: fail
+governance:
+  classification: mnpi
+  column_masks:
+    notional_amount: "0.00"
+schedule:
+  cron: "*/5 * * * *"
+  sla_minutes: 10
+```
+
+### Step 2: Generate All Artifacts
+
+```python
+from aws2lakehouse.factory import PipelineSpec, PipelineFactory
+
+# Load the spec
+spec = PipelineSpec.from_yaml("specs/trade_events.yaml")
+
+# Generate everything
+factory = PipelineFactory(catalog="production", environment="prod")
+artifacts = factory.generate(spec)
+
+# What you get:
+print(artifacts.notebook_code)    # Complete Databricks notebook
+print(artifacts.job_yaml)         # DAB-compatible job resource
+print(artifacts.dq_sql)           # Data quality expectations
+print(artifacts.governance_sql)   # Column masks + row filters + tags
+print(artifacts.test_code)        # pytest validation suite
+print(artifacts.monitoring_sql)   # Freshness + volume monitoring queries
+```
+
+### Step 3: Batch-Generate 1000 Pipelines
+
+```python
+# Place all YAML specs in a directory, then generate ALL at once
+all_artifacts = factory.generate_batch("specs/")
+print(f"Generated {len(all_artifacts)} pipeline artifacts")
+
+# Write artifacts to files
+for art in all_artifacts:
+    Path(f"output/{art.spec.domain}/{art.spec.name}/").mkdir(parents=True, exist_ok=True)
+    Path(f"output/{art.spec.domain}/{art.spec.name}/notebook.py").write_text(art.notebook_code)
+    Path(f"output/{art.spec.domain}/{art.spec.name}/job.yml").write_text(art.job_yaml)
+    Path(f"output/{art.spec.domain}/{art.spec.name}/dq.sql").write_text(art.dq_sql)
+    Path(f"output/{art.spec.domain}/{art.spec.name}/governance.sql").write_text(art.governance_sql)
+```
+
+---
+
+## One-Command Migration CLI
+
+The fastest way to use aws2lakehouse — no Python code, no YAML to write manually.
+
+### Basic Usage
+
+```bash
+# Migrate an AWS project to Databricks (one command)
+python migrate.py --source ./aws-project --dest ./databricks-project
+
+# With custom catalog and org name
+python migrate.py --source ./aws-repo --dest ./dbx-repo --catalog production --org acme-capital
+
+# Preview what would be generated (no files written)
+python migrate.py --source ./aws-repo --dest ./dbx-repo --dry-run
+
+# Enable AI-enhanced code transformation and documentation
+python migrate.py --source ./aws-repo --dest ./dbx-repo --ai --ai-model opus
+
+# Parallel AI calls for large migrations (4 threads)
+python migrate.py --source ./aws-repo --dest ./dbx-repo --ai --threads 4
+
+# Verbose mode (shows fallback warnings during parsing)
+python migrate.py --source ./aws-repo --dest ./dbx-repo -v
+
+# Clean destination before generating
+python migrate.py --source ./aws-repo --dest ./dbx-repo --clean
+```
+
+### CLI Reference
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--source` | (required) | Path to source AWS project folder |
+| `--dest` | (required) | Path for output Databricks project |
+| `--catalog` | `production` | Target Unity Catalog name |
+| `--org` | `acme` | Organization name (used in bundle config) |
+| `--ai` | off | Enable AI enhancement (databricks-claude-opus-4-6) |
+| `--ai-model` | `opus` | Model tier: `opus` (best), `sonnet` (balanced), `haiku` (fast) |
+| `--threads` | `1` | Parallel threads for AI calls |
+| `--dry-run` | off | Preview specs without writing artifacts |
+| `--clean` | off | Delete destination before generating |
+| `--verbose` | off | Show detailed parsing output |
+
+### What Happens (9-Step Pipeline)
+
+```
+[1/9] Scan source repository (finds DAGs, Step Functions, EMR, Glue)
+[2/9] Parse pipeline metadata (extract schedules, sources, classifications)
+[3/9] Auto-generate PipelineSpecs (zero manual YAML)
+[4/9] Run factory (6 artifacts per pipeline)
+[5/9] Create destination repo structure
+[6/9] Write all artifacts
+[7/9] Write bundle config, CI/CD, README
+[8/9] Generate project-specific documentation (7 docs)
+[9/9] AI-enhance with Foundation Models (optional, with --ai)
+```
+
+### Output Structure
+
+```
+databricks-project/
+├── databricks.yml              # DAB bundle config (dev/staging/prod targets)
+├── README.md                   # Auto-generated project README
+├── .gitignore
+├── .github/workflows/deploy.yml
+├── src/
+│   ├── common/                 # Shared utilities
+│   └── pipelines/
+│       ├── risk/bronze/        # Domain-specific notebooks
+│       ├── lending/bronze/
+│       └── customer/bronze/
+├── resources/jobs/             # Lakeflow Job YAML configs
+├── governance/column_masks/    # MNPI/PII column mask SQL
+├── quality/                    # DQ expectations SQL
+├── monitoring/                 # Freshness + volume alert SQL
+├── tests/validation/           # Migration validation pytest
+└── docs/                       # AUTO-GENERATED DOCUMENTATION
+    ├── MIGRATION_REPORT.md     # What was migrated, stats, risk profile
+    ├── ARCHITECTURE.md         # UC structure, compute strategy
+    ├── GOVERNANCE.md           # Actual MNPI/PII controls applied
+    ├── INGESTION_PATTERNS.md   # Patterns used (references actual pipelines)
+    ├── RUNBOOK.md              # Operations runbook (all pipelines)
+    ├── VALIDATION_CHECKLIST.md # Pre/post cutover steps
+    ├── WAVE_PLAN.md            # Migration wave assignments
+    ├── EXECUTIVE_SUMMARY.md    # AI-generated (with --ai)
+    ├── PIPELINE_DESCRIPTIONS.md# AI-generated (with --ai)
+    └── MIGRATION_REPORT_ENRICHED.md  # AI-enhanced (with --ai)
+```
+
+### Auto-Generated Documentation
+
+Every `migrate.py` run produces **7 project-specific docs** (10 with `--ai`). These are NOT generic templates — they reference your actual pipelines, domains, schedules, and MNPI columns.
+
+| Document | Content |
+|----------|---------|
+| `MIGRATION_REPORT.md` | Pipeline inventory table, risk profile, deploy instructions |
+| `ARCHITECTURE.md` | Unity Catalog schema tree, compute strategy matrix, data flow diagram |
+| `GOVERNANCE.md` | MNPI/PII controls applied, access groups, audit configuration |
+| `INGESTION_PATTERNS.md` | Which source patterns used, references to actual pipeline code |
+| `RUNBOOK.md` | Per-pipeline operations guide grouped by domain, common issues & fixes |
+| `VALIDATION_CHECKLIST.md` | Checkboxes for every pipeline, pre/post cutover verification |
+| `WAVE_PLAN.md` | Complexity-sorted wave assignments, timeline estimate |
+
+---
+
+## AI-Powered Migration (Foundation Models)
+
+With `--ai`, the accelerator calls **databricks-claude-opus-4-6** (or sonnet/haiku) to provide intelligent enhancements beyond template generation.
+
+### What AI Adds
+
+| Enhancement | Description |
+|-------------|-------------|
+| Executive Summary | Stakeholder-ready summary of the migration |
+| Code Transform | AI-rewritten notebooks for top 3 critical pipelines |
+| Pipeline Descriptions | Natural language explanation of each pipeline |
+| Risk-Annotated Report | Migration report with AI-inserted risk callouts |
+| Quality Rule Suggestions | Domain-aware DQ expectations |
+| Debug Assistance | Error diagnosis and fix suggestions |
+| **Code Comparison** | **Semantic diff: source AWS vs generated Databricks (PASS/WARN/FAIL)** |
+
+### Using AIClient Directly
+
+```python
+from aws2lakehouse.genai.ai_client import AIClient
+
+# Initialize (auto-discovers credentials from env or SDK)
+ai = AIClient(model="opus")  # or "sonnet", "haiku"
+
+# Transform AWS code to Databricks
+result = ai.transform_code(
+    source_code=glue_code,
+    source_type="glue",
+    context="catalog=production, domain=risk, classification=mnpi"
+)
+
+# Generate pipeline description
+desc = ai.explain_pipeline(pipeline_spec_dict)
+
+# Suggest quality rules
+rules = ai.suggest_quality_rules(
+    table_name="prod.risk_bronze.trade_events",
+    columns=["trade_id", "symbol", "quantity", "price"],
+    domain="risk/trading"
+)
+
+# Debug a migration error
+fix = ai.debug_migration(
+    error_message="Table not found: hive_metastore.default.trades",
+    source_code=notebook_code,
+    context="Migrating from EMR Hive to Unity Catalog"
+)
+```
+
+### Authentication
+
+The AI client discovers credentials in this order:
+1. Environment variables: `DATABRICKS_HOST` + `DATABRICKS_TOKEN`
+2. Databricks SDK: `WorkspaceClient()` (from `.databrickscfg`)
+3. Notebook context: `dbruntime` (when running inside Databricks)
+
+### Cost Estimation
+
+| Model | Speed | Cost per 1M tokens | Best For |
+|-------|-------|---------------------|----------|
+| `haiku` | Fastest | ~$0.25 | Bulk transforms, CI/CD |
+| `sonnet` | Balanced | ~$3.00 | Daily development |
+| `opus` | Best quality | ~$15.00 | Critical pipelines, docs |
+
+Token usage is tracked and reported at the end of each `--ai` run.
+
+### Post-Migration Code Comparison
+
+The most valuable AI use case: **semantic diff** between source AWS code and generated Databricks code. Catches logic gaps that data validation alone misses.
+
+```python
+from aws2lakehouse.genai.ai_client import AIClient
+
+ai = AIClient(model="sonnet")  # sonnet is ideal (fast + accurate)
+
+# ── Single pipeline comparison ──
+result = ai.compare_migration(
+    source_code=open("aws-repo/emr_jobs/trade_events_streaming.sh").read(),
+    target_code=open("dbx-repo/src/pipelines/risk/bronze/trade_events_streaming.py").read(),
+    pipeline_name="trade_events_streaming",
+    source_type="emr",
+    context="domain=risk, classification=mnpi, merge_keys=[trade_id]"
+)
+
+print(result)
+# ✅ trade_events_streaming: PASS (confidence: 94%)
+#    Logic parity: Yes
+#    Summary: Core streaming logic preserved. Kafka offsets, windowing, and dedup intact.
+
+# ── Or if issues found ──
+# ❌ payment_processing: FAIL (confidence: 88%)
+#    Logic parity: NO
+#    Issues (2):
+#      [critical] missing_transforms: SCD Type 2 history not maintained in target
+#        → Fix: Add MERGE with matched/not-matched conditions preserving effective_date
+#      [high] edge_cases: NULL coalesce on amount uses 0 in source, dropped in target
+#        → Fix: Add COALESCE(amount, 0) to target SELECT
+```
+
+#### Batch Comparison (All Pipelines)
+
+```python
+# Compare all migrated pipelines at once (4 threads for speed)
+results = ai.batch_compare(
+    file_pairs=[
+        {"name": "trade_events", "source_path": "aws/emr_jobs/trade_events.sh",
+         "target_path": "dbx/src/pipelines/risk/bronze/trade_events.py"},
+        {"name": "loan_app_etl", "source_path": "aws/glue_jobs/loan_application.py",
+         "target_path": "dbx/src/pipelines/lending/bronze/loan_app_etl.py"},
+        {"name": "market_data", "source_path": "aws/emr_jobs/market_data_feed.sh",
+         "target_path": "dbx/src/pipelines/risk/bronze/market_data_feed.py"},
+        # ... all pipeline pairs
+    ],
+    source_type="emr",
+    context="Financial services migration, MNPI-regulated",
+    threads=4
+)
+
+# Print formatted report
+ai.print_comparison_report(results)
+```
+
+**Output:**
+```
+══════════════════════════════════════════════════════════════════════
+  POST-MIGRATION SEMANTIC COMPARISON REPORT
+══════════════════════════════════════════════════════════════════════
+
+  Pipelines compared: 8
+  ✅ PASS: 6  ⚠️  WARN: 1  ❌ FAIL: 1
+  Total issues found: 3
+  Tokens used: 42,350
+
+──────────────────────────────────────────────────────────────────────
+  ✅ trade_events_streaming: PASS (confidence: 94%)
+  ✅ market_data_feed: PASS (confidence: 91%)
+  ✅ customer_360: PASS (confidence: 89%)
+  ⚠️  vendor_file_ingestion: WARN (confidence: 85%)
+     [medium] config_drift: shuffle.partitions=200 in source, not set in target
+       → Fix: Add spark.conf.set("spark.sql.shuffle.partitions", "200")
+  ❌ payment_processing: FAIL (confidence: 88%)
+     [critical] missing_transforms: Incremental watermark logic not migrated
+       → Fix: Add .option("maxFilesPerTrigger", 1000) with watermark column
+
+══════════════════════════════════════════════════════════════════════
+  ⚠️  ACTION REQUIRED: Fix FAIL items before production cutover.
+══════════════════════════════════════════════════════════════════════
+```
+
+#### What It Checks
+
+| Category | Examples |
+|----------|----------|
+| `logic_parity` | Same filters, joins, aggregations, CASE/WHEN, window functions |
+| `config_drift` | shuffle.partitions, broadcast threshold, write semantics changed |
+| `missing_transforms` | Business logic in source not present in target |
+| `schema_changes` | Columns added/dropped/renamed/retyped without handling |
+| `edge_cases` | NULL handling, timezone conversions, type coercions, dedup |
+
+#### ComparisonResult Object
+
+```python
+result.verdict        # "PASS", "WARN", or "FAIL"
+result.logic_parity   # bool — core business logic preserved?
+result.confidence     # 0.0–1.0 confidence in assessment
+result.summary        # Plain-English one-liner
+result.issues         # List[{severity, category, description, suggestion}]
+result.has_issues     # bool — any issues found?
+```
+
+#### Recommended Workflow
+
+```bash
+# 1. Generate migration (no AI needed here)
+python migrate.py --source ./aws-repo --dest ./dbx-repo
+
+# 2. Compare source vs target (AI validates logic parity)
+python -c "
+from aws2lakehouse.genai.ai_client import AIClient
+ai = AIClient(model='sonnet')
+# ... batch_compare + print_comparison_report
+"
+
+# 3. Fix any FAIL items, re-compare until all PASS
+# 4. Deploy with confidence
+```
+
+
+## The Migration Factory (Core Engine)
+
+The factory is the **central differentiator** of this accelerator. It eliminates manual pipeline rewriting entirely.
+
+### How It Works
+
+```
+┌────────────────┐         ┌──────────────────┐         ┌──────────────────────┐
+│  Pipeline YAML │  ──→    │   PipelineSpec   │  ──→    │   PipelineFactory    │
+│  (14 sections) │         │   (dataclass)    │         │   .generate(spec)    │
+└────────────────┘         └──────────────────┘         └──────────────────────┘
+                                                                  │
+                                                                  ▼
+                                               ┌─────────────────────────────────┐
+                                               │      PipelineArtifacts          │
+                                               │                                 │
+                                               │  .notebook_code    (Python)     │
+                                               │  .job_yaml         (DAB YAML)   │
+                                               │  .dq_sql           (SQL)        │
+                                               │  .governance_sql   (SQL)        │
+                                               │  .test_code        (pytest)     │
+                                               │  .monitoring_sql   (SQL)        │
+                                               └─────────────────────────────────┘
+```
+
+### PipelineSpec Dataclass Structure
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `name` | str | Pipeline identifier (used for table name if not specified) |
+| `domain` | str | Business domain (risk, lending, compliance, etc.) |
+| `source` | SourceConfig | Source system details (type + config dict) |
+| `target` | TargetConfig | Target table, mode (streaming/batch/merge), partitioning |
+| `quality` | List[QualityRule] | Data quality rules with actions (warn/drop/quarantine/fail) |
+| `governance` | GovernanceConfig | Classification, MNPI columns, masks, filters, embargo |
+| `compute` | ComputeConfig | Cluster type, Photon, workers |
+| `schedule` | ScheduleConfig | Cron, SLA, retries, timeout |
+| `alerting` | AlertConfig | Notifications on failure/SLA breach/success |
+| `tags` | Dict | Cost center, criticality, regulatory tags |
+| `depends_on` | List[str] | Upstream pipeline dependencies |
+| `transform_sql` | str | Optional SQL transformation for Silver layer |
+
+### Supported Source Types
+
+| Source Type | Config Keys | Generated Pattern |
+|-------------|-------------|-------------------|
+| `kafka` | topic, secret_scope, starting_offsets, max_offsets | Structured Streaming + JSON parse |
+| `auto_loader` | path, format (csv/json/parquet/avro) | CloudFiles with schema evolution |
+| `delta_share` | share_name, schema, table | CDF readStream |
+| `jdbc` | secret_scope, source_table, partition_column | Parallel JDBC with watermark |
+| `mongodb` | connection_uri_secret, database, collection | Change streams |
+| `snowflake` | secret_scope, warehouse, database, schema, table | Snowflake connector |
+| `delta_table` | source_catalog, source_schema, source_table | CDF/readStream from existing Delta |
+
+### Target Modes
+
+| Mode | Behavior |
+|------|----------|
+| `streaming` | writeStream with trigger (availableNow or continuous) |
+| `batch` | Overwrite or append batch write |
+| `merge` | MERGE INTO with configurable merge_keys, SCD Type 1 or 2 |
+
+---
+
+## SpecGenerator (Zero-YAML Pipeline Specs)
+
+The `SpecGenerator` bridges discovery and the factory — it converts raw pipeline inventory into fully-formed `PipelineSpec` objects without manual YAML authoring.
+
+### From Inventory (Batch)
+
+```python
+from aws2lakehouse.factory.spec_generator import SpecGenerator
+
+# Pipeline inventory from scanners (list of dicts)
+inventory = [
+    {
+        "name": "trade_events_streaming",
+        "domain": "risk",
+        "source_type": "kafka",
+        "source_config": {"topic": "trade-events", "secret_scope": "kafka-prod"},
+        "schedule": "*/5 * * * *",
+        "sla_minutes": 10,
+        "business_impact": "critical",
+        "owner": "risk-team@company.com",
+        "mnpi_columns": ["notional_amount", "counterparty_name"],
+        "pii_columns": [],
+        "classification": "mnpi",
+        "pk_column": "trade_id",  # Overrides naive heuristic
+    },
+    # ... hundreds more from AirflowScanner, SparkSubmitParser, etc.
+]
+
+# Generate specs (auto-infers DQ rules, compute sizing, governance)
+generator = SpecGenerator(catalog="production")
+specs = generator.from_inventory(inventory)
+
+# Each spec is ready for the factory
+for spec in specs:
+    print(f"{spec.name}: {spec.source.type.value} → {spec.target.catalog}.{spec.target.schema}.{spec.target.table}")
+```
+
+### From Live Spark Table
+
+```python
+# Generate a spec from an existing Delta table's metadata
+spec = generator.from_spark_table(spark, "production.risk_bronze.trade_events")
+
+# Uses DESCRIBE EXTENDED to extract:
+#   - Column names and types → auto-generated DQ rules
+#   - Table properties → classification, owner
+#   - Partition columns → target.partition_by
+```
+
+### What SpecGenerator Auto-Generates
+
+| Field | How It's Inferred |
+| --- | --- |
+| `target.schema` | `{domain}_bronze` (from domain) |
+| `quality` rules | NOT NULL on PK, format checks on dates/amounts |
+| `governance` | Classification from `business_impact`, masks from `mnpi_columns` |
+| `compute` | Streaming → `serverless`, batch → `jobs_compute`, ML → `gpu_cluster` |
+| `schedule.cron` | Quartz format (auto-converted from Unix cron, DOM/DOW mutual exclusion) |
+| `alerting` | Auto-added for `critical` business impact pipelines |
+
+### Custom Domain Mapping
+
+```python
+# Override default keyword→domain detection
+custom_domains = {
+    "treasury": "treasury",
+    "fx": "markets",
+    "swap": "derivatives",
+    "kyc": "compliance",
+}
+
+generator = SpecGenerator(catalog="production", domain_mapping=custom_domains)
+specs = generator.from_inventory(inventory)
+```
+
+---
+
+## Module-by-Module Usage Guide
+
+### 1. Discovery (`aws2lakehouse.discovery`)
+
+Scan existing infrastructure and build a complete inventory.
+
+```python
+from aws2lakehouse.discovery import PipelineInventory, ComplexityAnalyzer, WavePlanner
+from aws2lakehouse.discovery.dependency_graph import DependencyGraph
+
+# ── Scan and catalog pipelines ──
+inventory = PipelineInventory()
+inventory.add_emr_cluster("j-ABC123", name="daily_risk_calc", domain="risk",
+                          schedule="0 6 * * *", avg_duration_min=45)
+
+# ── Score complexity ──
+analyzer = ComplexityAnalyzer()
+score = analyzer.score(pipeline={
+    "has_custom_jar": True,
+    "num_dependencies": 5,
+    "has_streaming": True,
+    "data_volume_gb": 500,
+    "num_transformations": 12
+})
+print(f"Complexity: {score}/100 → {analyzer.categorize(score)}")
+
+# ── Plan migration waves ──
+planner = WavePlanner()
+waves = planner.plan(inventory.pipelines, waves=6, max_per_wave=50)
+for wave_num, pipelines in waves.items():
+    print(f"Wave {wave_num}: {len(pipelines)} pipelines")
+
+# ── Build dependency graph ──
+graph = DependencyGraph()
+graph.add_from_table_lineage(inventory.pipelines)
+order = graph.topological_sort()   # Safe migration sequence
+critical = graph.critical_path()   # Minimum duration
+cycles = graph.detect_cycles()     # Must resolve before migrating
+auto_waves = graph.migration_waves(max_per_wave=50)
+print(graph.summary())
+```
+
+**Available Scanners:**
+
+```python
+from aws2lakehouse.discovery import (
+    AirflowScanner, SnowflakeScanner, MongoDBScanner, PostgreSQLScanner, LatencyClassifier
+)
+
+# Airflow DAG scanning (folder or REST API)
+airflow = AirflowScanner()
+dags = airflow.scan_folder("/opt/airflow/dags")
+dags_api = airflow.scan_api("https://airflow.company.com", token="...")
+
+# Snowflake scanning (generates SQL to run in Snowflake)
+sf = SnowflakeScanner()
+sql = sf.generate_scan_sql()  # Run this in Snowflake to extract metadata
+
+# MongoDB scanning (generates JS to run in mongo shell)
+mongo = MongoDBScanner()
+js = mongo.generate_scan_script()
+
+# PostgreSQL scanning (tables, CDC columns, FK deps, replication slots)
+pg = PostgreSQLScanner()
+sql = pg.generate_scan_sql()
+
+# Classify latency requirements
+classifier = LatencyClassifier()
+latency = classifier.classify(schedule="*/5 * * * *", trigger="continuous")
+# Returns: "streaming"
+```
+
+### 2. EMR Migration (`aws2lakehouse.emr`)
+
+Migrate EMR clusters, spark-submit jobs, and custom JARs.
+
+```python
+from aws2lakehouse.emr import EMRMigrator, SparkSubmitParser, JARAnalyzer
+
+# ── Parse spark-submit commands ──
+parser = SparkSubmitParser()
+job = parser.parse("""
+spark-submit --class com.company.RiskCalc \
+  --master yarn --deploy-mode cluster \
+  --num-executors 10 --executor-memory 8g \
+  --conf spark.sql.shuffle.partitions=400 \
+  s3://jars/risk-calc-2.1.jar \
+  --date 2024-01-01 --mode full
+""")
+
+# ── Analyze JAR compatibility ──
+jar_analyzer = JARAnalyzer()
+report = jar_analyzer.analyze(job)
+# Reports: Spark version compatibility, deprecated APIs, Hive dependencies
+
+# ── Transform code patterns ──
+migrator = EMRMigrator()
+transformed = migrator.transform_code(original_code, transformations=[
+    "s3_to_volumes",        # s3://bucket/path → /Volumes/catalog/schema/volume/path
+    "hive_to_unity",        # spark.sql("USE db") → spark.sql("USE CATALOG catalog")
+    "emr_config_remove",    # Remove EMR-specific configs
+    "add_photon_hints",     # Add Photon-compatible optimizations
+])
+```
+
+### 3. Orchestration (`aws2lakehouse.orchestration`)
+
+Convert Step Functions and Airflow DAGs to Databricks Lakeflow Jobs.
+
+```python
+from aws2lakehouse.orchestration import StepFunctionConverter, AirflowConverter
+
+# ── Convert AWS Step Functions ──
+sf_converter = StepFunctionConverter()
+job_yaml = sf_converter.convert_file("step_functions/daily_risk.json")
+# Handles: Parallel, Choice, Wait, Map, Task, Retry, Catch states
+
+# ── Convert Airflow DAGs ──
+airflow_converter = AirflowConverter()
+job_yaml = airflow_converter.convert_file("dags/loan_processing.py")
+# Handles: 17 operator types including PythonOperator, BashOperator,
+#   SparkSubmitOperator, Sensors, S3KeySensor, etc.
+# Extracts: task1 >> task2 >> task3 dependency chains
+# Converts: cron_presets to Quartz expressions
+```
+
+### 4. Ingestion (`aws2lakehouse.ingestion`)
+
+Pre-built patterns for every source type.
+
+```python
+from aws2lakehouse.ingestion import (
+    AutoLoaderPattern, DeltaShareCDF, KafkaIngestion, ConnectorFactory
+)
+
+# ── Use ConnectorFactory for any source ──
+connector = ConnectorFactory.create("kafka", config={
+    "topic": "trade-events",
+    "secret_scope": "kafka-prod",
+    "starting_offsets": "latest"
+})
+notebook_code = connector.generate_notebook()
+
+# ── Or use specific patterns ──
+auto_loader = AutoLoaderPattern(
+    path="/Volumes/production/raw/transactions/",
+    format="csv",
+    schema_evolution=True,
+    rescue_data=True
+)
+code = auto_loader.generate()
+```
+
+### 5. Governance (`aws2lakehouse.governance`)
+
+Full MNPI compliance for regulated environments.
+
+```python
+from aws2lakehouse.governance import MNPIController, UnityCatalogSetup
+
+# ── Column Masks (hide sensitive data from unauthorized users) ──
+mnpi = MNPIController()
+mask_sql = mnpi.generate_column_mask_sql(
+    catalog="production",
+    schema="risk_bronze",
+    table="trade_events",
+    column="notional_amount",
+    mask_value="0.00",
+    authorized_groups=["risk_trading_desk"]
+)
+# Generates:
+#   CREATE FUNCTION mask_notional_amount(val)
+#   ALTER TABLE ... ALTER COLUMN ... SET MASK mask_notional_amount
+
+# ── Dynamic Views (RBAC with group membership checks) ──
+view_sql = mnpi.generate_dynamic_views_sql(
+    source_table="production.risk_bronze.trade_events",
+    view_name="production.risk_bronze.v_trade_events_secure",
+    row_filter="trade_date < current_date() - INTERVAL 1 DAY",
+    column_masks={"counterparty_name": "'[RESTRICTED]'"},
+    authorized_groups=["risk_trading_desk"]
+)
+
+# ── Row Filters with Embargo ──
+filter_sql = mnpi.generate_row_filter_sql(
+    catalog="production",
+    schema="risk_bronze",
+    table="trade_events",
+    condition="trade_date < current_date() - INTERVAL 1 DAY",
+    authorized_groups=["risk_trading_desk"]
+)
+```
+
+### 6. Quality & Observability (`aws2lakehouse.quality`, `aws2lakehouse.observability`)
+
+```python
+from aws2lakehouse.quality import FreshnessSLAMonitor, VolumeAnomalyDetector, AlertManager
+from aws2lakehouse.observability import MonitoringDashboard, IdempotentPatterns, PartitionStrategy
+
+# ── Freshness SLA Monitoring ──
+freshness = FreshnessSLAMonitor()
+sql = freshness.generate_check_sql(
+    table="production.risk_bronze.trade_events",
+    sla_minutes=10,
+    notification_channel="slack:#risk-alerts"
+)
+
+# ── Volume Anomaly Detection ──
+volume = VolumeAnomalyDetector()
+sql = volume.generate_check_sql(
+    table="production.risk_bronze.trade_events",
+    lookback_days=7,
+    low_threshold=0.5,   # Alert if <50% of rolling average
+    high_threshold=2.0   # Alert if >200% of rolling average
+)
+
+# ── Monitoring Dashboard (7 pre-built views) ──
+dashboard = MonitoringDashboard(catalog="production", schema="monitoring")
+all_views_sql = dashboard.generate_all()
+# Creates: pipeline_health, freshness_summary, volume_trends,
+#   dq_scores, cost_tracking, sla_compliance, dependency_status
+
+# ── Idempotent Patterns (safe re-runs) ──
+idempotent = IdempotentPatterns()
+merge_sql = idempotent.merge_pattern(table="trades", keys=["trade_id"])
+overwrite_sql = idempotent.partition_overwrite_pattern(table="trades", partition_col="trade_date")
+
+# ── Partition Strategy Recommendations ──
+strategy = PartitionStrategy()
+recommendation = strategy.recommend(
+    table_size_gb=500,
+    query_patterns=["WHERE trade_date = ...", "WHERE counterparty_id = ..."],
+    cardinality={"trade_date": 365, "counterparty_id": 50000}
+)
+# Returns: partition_by=["trade_date"], z_order_by=["counterparty_id"]
+```
+
+### 7. Compute (`aws2lakehouse.compute`)
+
+Map 141 AWS instance types to optimal Databricks configurations.
+
+```python
+from aws2lakehouse.compute import ClusterMapper
+
+mapper = ClusterMapper()
+
+# Map a single instance type
+result = mapper.map("r5.4xlarge")
+# Returns: Databricks node type, Photon acceleration factor, cost estimate
+
+# Map an entire EMR cluster configuration
+cluster_config = mapper.map_cluster({
+    "master": "m5.2xlarge",
+    "core": {"type": "r5.4xlarge", "count": 10},
+    "task": {"type": "c5.2xlarge", "count": 5, "spot": True}
+})
+# Returns: Recommended Databricks cluster with cost comparison
+
+# Get right-sizing recommendations
+recommendation = mapper.recommend(
+    workload_type="etl_batch",  # etl_batch, etl_streaming, ml_training, sql_analytics
+    data_volume_gb=500,
+    duration_target_min=30
+)
+```
+
+### 8. CI/CD (`aws2lakehouse.cicd`)
+
+```python
+from aws2lakehouse.cicd import DABGenerator, BranchStrategy, AzureDevOpsPipeline
+
+# ── Generate Databricks Asset Bundle ──
+dab = DABGenerator()
+bundle_yaml = dab.generate(
+    project_name="risk-pipelines",
+    environments=["dev", "staging", "production"],
+    jobs=["trade_events", "market_data", "pnl_aggregation"]
+)
+
+# ── Branch Strategy & CODEOWNERS ──
+branch = BranchStrategy()
+codeowners = branch.generate_codeowners(domains=["risk", "lending", "compliance"])
+
+# ── Azure DevOps (alternative to GitHub Actions) ──
+azure = AzureDevOpsPipeline()
+pipeline_yaml = azure.generate(
+    environments=["dev", "staging", "production"],
+    manual_approval_for=["production"]
+)
+```
+
+### 9. GenAI Assistance (`aws2lakehouse.genai`)
+
+```python
+from aws2lakehouse.genai import PipelineGenerator, DebugAssistant, LineageExplainer
+
+# ── Natural Language → YAML Spec ──
+generator = PipelineGenerator()
+yaml_spec = generator.from_description(
+    "Ingest trade events from Kafka topic 'trade-events' into the risk bronze layer. "
+    "The data contains MNPI fields (notional_amount, counterparty_name). "
+    "Needs 5-minute micro-batches with 10-minute SLA."
+)
+print(yaml_spec)  # Complete, valid YAML ready for the factory
+
+# ── Debug Assistant ──
+debug = DebugAssistant()
+diagnosis = debug.diagnose(
+    error="AnalysisException: Table or view not found: risk_bronze.trade_events",
+    context={"catalog": "production", "notebook": "trade_events_ingestion"}
+)
+print(diagnosis.likely_cause)     # "Missing USE CATALOG statement"
+print(diagnosis.suggested_fix)    # "Add: spark.sql('USE CATALOG production')"
+print(diagnosis.code_suggestion)  # Full corrected code block
+
+# ── Lineage Explainer ──
+lineage = LineageExplainer()
+explanation = lineage.explain(
+    table="production.risk_gold.daily_pnl",
+    upstream=["production.risk_silver.trades", "production.risk_silver.positions"]
+)
+print(explanation)  # Plain English description of data flow
+```
+
+---
+
+## End-to-End Migration Workflow
+
+### Phase 1: Discovery & Assessment (Weeks 1-3)
+
+```python
+# 1. Run scanners against existing infrastructure
+from aws2lakehouse.discovery import PipelineInventory, AirflowScanner, LatencyClassifier
+from aws2lakehouse.discovery.dependency_graph import DependencyGraph
+
+inventory = PipelineInventory()
+airflow = AirflowScanner()
+dags = airflow.scan_folder("/opt/airflow/dags")
+
+# 2. Classify complexity and latency
+for pipeline in inventory.pipelines:
+    pipeline.complexity = analyzer.score(pipeline)
+    pipeline.latency = classifier.classify(pipeline.schedule)
+
+# 3. Build dependency graph
+graph = DependencyGraph()
+graph.add_from_table_lineage(inventory.pipelines)
+print(graph.summary())
+print(f"Critical path: {graph.critical_path()}")
+print(f"Cycles: {graph.detect_cycles()}")  # Must resolve before migrating
+
+# 4. Generate wave plan
+waves = graph.migration_waves(max_per_wave=50)
+
+# 5. Conduct stakeholder interviews (use docs/STAKEHOLDER_TEMPLATES.md)
+# 6. Calculate ROI (see ROI Calculator section)
+```
+
+### Phase 2: Pilot (Weeks 4-6)
+
+Use the pre-built pilot specs to validate the full pipeline end-to-end:
+
+```python
+# Start with the simple pipeline
+spec = PipelineSpec.from_yaml("examples/pilot/simple_pipeline.yaml")
+artifacts = factory.generate(spec)
+# Deploy, run, validate
+
+# Then the complex pipeline (Kafka + MNPI + merge)
+spec = PipelineSpec.from_yaml("examples/pilot/complex_pipeline.yaml")
+artifacts = factory.generate(spec)
+# Deploy, run, validate governance, validate DQ
+```
+
+### Phase 3: Batch Migration (Weeks 7-16)
+
+```python
+# For each wave, batch-generate from YAML specs
+for wave_num in range(1, 7):
+    specs_dir = f"specs/wave_{wave_num}/"
+    artifacts = factory.generate_batch(specs_dir)
+    print(f"Wave {wave_num}: Generated {len(artifacts)} pipelines")
+    
+    # Deploy all via DABs
+    # Run validation suite
+    # Monitor dashboard
+```
+
+### Phase 4: Cutover & Hardening (Weeks 16-20)
+
+See [Cutover & Hypercare](#cutover--hypercare) section.
+
+---
+
+## Governance & MNPI Compliance
+
+Financial services environments require strict data access controls. The accelerator provides complete MNPI governance out of the box.
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                   GOVERNANCE LAYER                            │
+│                                                              │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐  │
+│  │ Column Masks │  │  Row Filters │  │  Dynamic Views   │  │
+│  │              │  │              │  │                  │  │
+│  │ mask_func()  │  │ filter_func()│  │ CASE WHEN        │  │
+│  │ ALTER COLUMN │  │ ALTER TABLE  │  │ is_member(group) │  │
+│  │ SET MASK     │  │ SET ROW FILTR│  │ THEN real_value  │  │
+│  │              │  │              │  │ ELSE masked      │  │
+│  └──────────────┘  └──────────────┘  └──────────────────┘  │
+│                            │                                  │
+│                            ▼                                  │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │              AUDIT LOG (7-year retention)              │   │
+│  │  who | accessed | what | when | from_where            │   │
+│  └──────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Governance in YAML Specs
+
+```yaml
+governance:
+  classification: mnpi          # public | internal | confidential | mnpi
+  embargo_hours: 24             # Data hidden for 24h after creation
+  mnpi_columns:                 # Columns requiring protection
+    - notional_amount
+    - counterparty_name
+    - pnl
+  column_masks:                 # What unauthorized users see
+    notional_amount: "0.00"
+    counterparty_name: "'[RESTRICTED]'"
+  row_filter: "trade_date < current_date() - INTERVAL 1 DAY"
+  owner_group: risk_trading_desk  # Group with full access
+```
+
+### Generated SQL (example)
+
+```sql
+-- Column Mask Function
+CREATE OR REPLACE FUNCTION production.risk_bronze.mask_notional_amount(val DECIMAL)
+RETURNS DECIMAL
+RETURN CASE WHEN is_account_group_member('risk_trading_desk') THEN val ELSE 0.00 END;
+
+-- Apply Mask
+ALTER TABLE production.risk_bronze.trade_events
+ALTER COLUMN notional_amount SET MASK production.risk_bronze.mask_notional_amount;
+
+-- Row Filter Function
+CREATE OR REPLACE FUNCTION production.risk_bronze.filter_trade_events()
+RETURNS BOOLEAN
+RETURN CASE 
+  WHEN is_account_group_member('risk_trading_desk') THEN TRUE
+  ELSE trade_date < current_date() - INTERVAL 1 DAY
+END;
+
+-- Apply Row Filter
+ALTER TABLE production.risk_bronze.trade_events
+SET ROW FILTER production.risk_bronze.filter_trade_events ON ();
+```
+
+---
+
+## Orchestration Templates
+
+Pre-built Databricks Workflow patterns for common scenarios.
+
+```python
+from aws2lakehouse.workflows import WorkflowTemplates, FolderStructureGenerator
+
+# ── Medallion Pipeline (Bronze → Silver → Gold) ──
+yaml = WorkflowTemplates.medallion_pipeline(
+    name="risk_medallion",
+    domain="risk",
+    tables=["trades", "positions", "market_data"],
+    catalog="production",
+    schedule="0 6 * * *"   # Daily at 6 AM
+)
+# Generates: parallel bronze tasks, sequential silver, single gold aggregation
+
+# ── Conditional Workflow (DQ gate) ──
+yaml = WorkflowTemplates.conditional_workflow(
+    name="guarded_ingestion",
+    domain="compliance",
+    check_notebook="/pipelines/compliance/check_source_quality",
+    success_notebook="/pipelines/compliance/ingest_data",
+    failure_notebook="/pipelines/compliance/remediate_source"
+)
+
+# ── For-Each Pattern (same logic, N tables) ──
+yaml = WorkflowTemplates.for_each_workflow(
+    name="daily_snapshot",
+    domain="lending",
+    tables=["applications", "approvals", "disbursements", "payments"],
+    notebook_path="/pipelines/lending/daily_snapshot"
+)
+
+# ── Backfill Workflow (historical reprocessing) ──
+yaml = WorkflowTemplates.backfill_workflow(
+    name="backfill_trades",
+    table="trade_events",
+    start_date="2020-01-01",
+    end_date="2024-12-31",
+    notebook_path="/pipelines/risk/bronze/trade_events",
+    parallelism=5
+)
+
+# ── Dual-Write Cutover (zero-downtime migration validation) ──
+yaml = WorkflowTemplates.dual_write_cutover(
+    name="trade_events",
+    domain="risk",
+    legacy_notebook="/legacy/emr_trade_events",
+    new_notebook="/pipelines/risk/bronze/trade_events",
+    validation_notebook="/validation/compare_outputs"
+)
+
+# ── Generate project folder structure ──
+structure = FolderStructureGenerator()
+tree = structure.generate(org="acme", domains=["risk", "lending", "compliance"])
+script = structure.generate_setup_script(org="acme", domains=["risk", "lending"])
+```
+
+---
+
+## Testing & Validation
+
+Automated validation of every migrated pipeline.
+
+```python
+from aws2lakehouse.validation import MigrationValidator
+
+validator = MigrationValidator()
+
+# ── Generate validation notebook for a single pipeline ──
+notebook = validator.generate_validation_notebook(
+    pipeline_name="trade_events",
+    source_table="legacy_db.trades",           # Source (AWS)
+    target_table="production.risk_bronze.trade_events",  # Target (Databricks)
+    primary_key="trade_id",
+    numeric_columns=["notional_amount", "pnl"],
+    tolerance=0.001  # 0.1% acceptable difference
+)
+# Checks: row count, schema, aggregates (sum/avg), duplicates, null keys
+
+# ── Batch validation (multiple tables at once) ──
+batch_notebook = validator.generate_batch_validation_notebook([
+    {"pipeline_name": "trades", "source_table": "legacy.trades",
+     "target_table": "prod.risk_bronze.trades", "primary_key": "trade_id"},
+    {"pipeline_name": "positions", "source_table": "legacy.positions",
+     "target_table": "prod.risk_bronze.positions", "primary_key": "position_id"},
+    {"pipeline_name": "market_data", "source_table": "legacy.market_data",
+     "target_table": "prod.risk_bronze.market_data", "primary_key": "instrument_id"},
+])
+
+# ── Business rule validation ──
+rules_sql = validator.generate_business_rule_tests(
+    table="production.risk_bronze.trade_events",
+    rules=[
+        {"name": "notional_positive", "condition": "notional_amount > 0", "threshold": 0.99},
+        {"name": "valid_currency", "condition": "currency IN ('USD','EUR','GBP')", "threshold": 0.98},
+        {"name": "no_future_dates", "condition": "trade_date <= current_date()", "threshold": 1.0},
+    ]
+)
+
+# ── Cutover checklist ──
+checklist = validator.generate_cutover_checklist(
+    pipeline_name="trade_events",
+    domain="risk"
+)
+```
+
+---
+
+## Cutover & Hypercare
+
+Three strategies for safe production cutover (see `docs/CUTOVER_PLAYBOOK.md` for full details):
+
+| Strategy | Risk Level | Best For | Rollback Speed |
+|----------|-----------|----------|----------------|
+| **Dual-Write** | Low | Critical/MNPI pipelines | Instant |
+| **Shadow Mode** | Low | High-impact pipelines | Instant (view swap) |
+| **Big-Bang** | Medium | Simple batch pipelines | Same-day |
+
+### Dual-Write Pattern (Recommended for Critical Pipelines)
+
+```
+[Source] ──┬──> [Legacy Pipeline] ──> [legacy_db.table]
+           │                              │
+           │                        [Compare Job] ──> Alert if drift
+           │                              │
+           └──> [New Pipeline] ─────> [new_db.table]
+```
+
+1. Run both pipelines in parallel for 2+ weeks
+2. Comparison job validates zero drift daily
+3. Cutover = disable legacy, point consumers to new table
+4. Rollback = re-enable legacy (< 5 minutes)
+
+### Hypercare Monitoring (7-14 days post-cutover)
+- Day 1: Verify first run, SLA met, DQ scores stable
+- Day 2-7: Monitor dashboard twice daily, spot-check reports
+- Day 7: Exit criteria check (7 consecutive successes, no alerts)
+- Day 14: Final handoff, archive legacy, update tracking
+
+---
+
+## ROI Calculator
+
+Build a data-driven business case for migration.
+
+```python
+from aws2lakehouse.roi_calculator import ROICalculator, AWSCurrentState, DatabricksProjectedState
+
+# ── Define current AWS costs ──
+aws = AWSCurrentState(
+    emr_monthly=120_000,
+    glue_monthly=35_000,
+    s3_monthly=25_000,
+    kinesis_monthly=15_000,
+    step_functions_monthly=5_000,
+    lambda_monthly=8_000,
+    other_monthly=7_000,
+    engineer_count=12,
+    avg_engineer_monthly=18_000
+)
+
+# ── Define projected Databricks costs ──
+databricks = DatabricksProjectedState(
+    jobs_dbu_monthly=55_000,
+    sql_warehouse_monthly=15_000,
+    serverless_monthly=10_000,
+    storage_monthly=18_000,
+    other_monthly=6_000,
+    engineer_count=7,
+    avg_engineer_monthly=18_000,
+    migration_investment=850_000,
+    migration_months=6
+)
+
+# ── Calculate ROI ──
+calc = ROICalculator(aws, databricks)
+result = calc.calculate()
+
+print(f"Monthly savings: ${result.monthly_savings:,.0f}")
+print(f"Annual savings:  ${result.annual_savings:,.0f}")
+print(f"Payback period:  {result.payback_months:.1f} months")
+print(f"3-year net:      ${result.three_year_net:,.0f}")
+
+# ── Generate executive summary ──
+summary = calc.generate_executive_summary()
+print(summary)  # Ready for stakeholder presentation
+```
+
+---
+
+## GenAI Assistance
+
+### Natural Language → Pipeline YAML
+
+```python
+from aws2lakehouse.genai import PipelineGenerator
+
+gen = PipelineGenerator()
+
+# Describe what you need in plain English
+yaml = gen.from_description("""
+    I need to ingest customer loan applications from our PostgreSQL database 
+    into the lending bronze layer. The table has about 50K new rows per day.
+    Fields include ssn and income which are PII. Run hourly with a 30-minute SLA.
+    Merge on application_id (upsert pattern).
+""")
+
+# Output: Complete, valid YAML spec with:
+# - source.type: jdbc
+# - target.mode: merge
+# - governance.classification: confidential
+# - governance.column_masks for ssn, income
+# - schedule.cron: "0 * * * *"
+# - schedule.sla_minutes: 30
+```
+
+### Debug Assistant
+
+```python
+from aws2lakehouse.genai import DebugAssistant
+
+debug = DebugAssistant()
+
+# Common errors it handles:
+diagnosis = debug.diagnose("StreamingQueryException: Data schema mismatch")
+# Returns: cause, fix (schema evolution settings), code snippet
+
+diagnosis = debug.diagnose("INSUFFICIENT_PERMISSIONS to access table")
+# Returns: cause, fix (GRANT statements needed), governance context
+```
+
+---
+
+## Robustness & Reliability
+
+The accelerator is hardened for enterprise-scale migrations (1000+ pipelines). Key reliability features:
+
+### AI Client Resilience
+
+```python
+from aws2lakehouse.genai.ai_client import AIClient
+
+ai = AIClient(model="opus")
+
+# Built-in retry with exponential backoff (3 attempts)
+# Handles: 429 (rate limit), 503 (service unavailable), timeouts
+# Backoff: 2s → 4s → 8s with jitter
+
+# Auto-truncation for large files (prevents context overflow)
+# Estimates tokens before sending; truncates with "[TRUNCATED]" marker
+# if content exceeds model's context window
+
+# Output sanitization: strips ```python fences from AI responses
+# Prevents syntax errors when writing AI-generated code to files
+```
+
+### Content-Based Detection
+
+The scanner doesn't rely solely on directory paths. It reads file content to detect:
+
+| Pattern | Detection |
+| --- | --- |
+| `DAG(` + `airflow` import | Airflow DAG (even if in `pipelines/` not `airflow/dags/`) |
+| `GlueContext` or `awsglue` | AWS Glue job (even if not in `glue/` folder) |
+
+```bash
+# Example: DAG in non-standard path still detected correctly
+aws-project/
+├── pipelines/
+│   └── daily_risk.py          # Contains DAG() → detected as Airflow DAG
+├── etl/
+│   └── customer_load.py       # Contains GlueContext → detected as Glue job
+```
+
+### Type-Safe Governance
+
+Column mask functions now infer the correct SQL type from the mask expression:
+
+| Mask Expression | Inferred Type | Generated SQL |
+| --- | --- | --- |
+| `'[REDACTED]'` | `STRING` | `CREATE FUNCTION mask_col(val STRING) RETURNS STRING` |
+| `0.00` | `DOUBLE` | `CREATE FUNCTION mask_col(val DOUBLE) RETURNS DOUBLE` |
+| `0` | `BIGINT` | `CREATE FUNCTION mask_col(val BIGINT) RETURNS BIGINT` |
+| `TRUE` / `FALSE` | `BOOLEAN` | `CREATE FUNCTION mask_col(val BOOLEAN) RETURNS BOOLEAN` |
+
+### Error Transparency
+
+All modules use structured error handling:
+- No silent `except: pass` — all exceptions logged via `warnings.warn()`
+- `--verbose` mode surfaces fallback decisions during inventory parsing
+- Factory methods raise descriptive errors (not generic `Exception`)
+- DQ SQL files always contain valid content (comment if no rules defined)
+
+### Validation Guarantees
+
+Every `migrate.py` run is AST-validated:
+- All generated `.py` files pass `ast.parse()` before write
+- YAML outputs validated against expected schema
+- Cron expressions checked for Quartz compatibility (DOM/DOW mutual exclusion)
+- Merge tests only generated when merge keys exist (prevents false positives)
+
+---
+
+## Wave Planning Dashboard
+
+Track migration progress with SQL dashboard views.
+
+```python
+from aws2lakehouse.dashboard import WavePlanningDashboard
+
+dashboard = WavePlanningDashboard(catalog="production", schema="migration_tracking")
+sql = dashboard.generate_all_sql()
+# Execute in SQL Warehouse to create:
+#   - pipeline_inventory table
+#   - wave_config table
+#   - migration_progress table (daily append)
+#   - v_inventory_summary (tile metrics)
+#   - v_wave_progress (completion % per wave)
+#   - v_risk_heatmap (domain × complexity × impact)
+#   - v_effort_burndown (line chart)
+#   - v_dependencies (blocked/resolved status)
+```
+
+Build a Lakeview dashboard on top of these views for real-time tracking.
+
+---
+
+## Repository Structure
+
+```
+aws2lakehouse/
+├── migrate.py                     # 🚀 ONE-COMMAND CLI (entry point)
+├── aws2lakehouse/                 # Core Python package
+│   ├── __init__.py
+│   ├── docs_generator.py          # 📝 Auto-generates 7-10 project docs
+│   ├── discovery/                 # 📊 Scan, classify, plan
+│   │   ├── __init__.py            #   PipelineInventory, ComplexityAnalyzer
+│   │   ├── pipeline_inventory.py  #   EMR/Glue/custom job cataloging
+│   │   ├── complexity_analyzer.py #   Complexity scoring (0-100)
+│   │   ├── wave_planner.py        #   Wave-based roadmap generation
+│   │   └── dependency_graph.py    #   DAG analysis, topological sort, cycles
+│   ├── factory/                   # ⚙️  THE CORE ENGINE
+│   │   ├── __init__.py            #   PipelineSpec, PipelineFactory, PipelineArtifacts
+│   │   └── spec_generator.py      #   SpecGenerator (inventory→specs, spark table→spec)
+│   ├── emr/                       # 🔄 EMR migration
+│   │   ├── __init__.py            #   EMRMigrator base
+│   │   └── emr_migrator.py        #   SparkSubmitParser, JARAnalyzer, code transform
+│   ├── glue/                      # 🔄 Glue ETL migration
+│   │   └── __init__.py            #   GlueMigrator, DynamicFrameConverter
+│   ├── orchestration/             # 🔀 Workflow conversion
+│   │   ├── __init__.py
+│   │   ├── step_function_converter.py  # Step Functions → Lakeflow Jobs
+│   │   └── airflow_converter.py        # Airflow DAGs → Lakeflow Jobs
+│   ├── ingestion/                 # 📥 Source connectors
+│   │   └── __init__.py            #   AutoLoader, Kafka, DeltaShare, JDBC, Mongo, SF
+│   ├── governance/                # 🔒 Security & compliance
+│   │   └── __init__.py            #   UnityCatalogSetup, MNPIController
+│   ├── quality/                   # ✅ Data quality
+│   │   └── __init__.py            #   FreshnessSLA, VolumeAnomaly, Alerts, Lineage
+│   ├── observability/             # 📈 Monitoring
+│   │   └── __init__.py            #   MonitoringDashboard, IdempotentPatterns
+│   ├── compute/                   # 💻 Cluster optimization
+│   │   ├── __init__.py
+│   │   └── cluster_mapper.py      #   141 instance types, 6 families
+│   ├── cicd/                      # 🚀 DevOps
+│   │   ├── __init__.py            #   DABGenerator, BranchStrategy
+│   │   └── azure_devops.py        #   AzureDevOpsPipeline
+│   ├── genai/                     # 🤖 AI assistance
+│   │   ├── __init__.py            #   PipelineGenerator, DebugAssistant, LineageExplainer
+│   │   └── ai_client.py           #   AIClient (retry, token mgmt, Foundation Models)
+│   ├── workflows/                 # 📋 Orchestration templates
+│   │   └── __init__.py            #   WorkflowTemplates (medallion, conditional, for_each)
+│   ├── dashboard/                 # 📊 Wave planning SQL
+│   │   └── __init__.py            #   WavePlanningDashboard (9 SQL objects)
+│   ├── validation/                # 🧪 Migration validation
+│   │   └── __init__.py            #   MigrationValidator, ValidationReport
+│   ├── bootstrap/                 # 🏗️  One-click setup
+│   │   └── __init__.py            #   Bootstrap (catalogs, schemas, tables, grants)
+│   ├── roi_calculator.py          # 💰 ROI + executive summary
+│   └── utils/                     # 🔧 Shared utilities
+│       ├── __init__.py
+│       ├── logger.py
+│       └── config.py
+├── templates/
+│   └── medallion/                 # Notebook templates (Bronze/Silver/Gold)
+│       └── __init__.py
+├── examples/
+│   ├── aws_repos/                 # 4 sample AWS source projects
+│   │   ├── aws-sample-data-project/    # 12-pipeline financial services repo
+│   │   ├── glue-library-project/       # Glue-heavy data warehouse
+│   │   ├── classic-etl-project/        # Simple batch ETL
+│   │   └── serverless-data-platform/   # Lambda + Step Functions
+│   ├── databricks_repos/          # Generated output (for reference)
+│   ├── pilot/                     # Ready-to-use pilot specs
+│   │   ├── simple_pipeline.yaml   #   CSV Auto Loader → Bronze
+│   │   └── complex_pipeline.yaml  #   Kafka → Bronze + MNPI + merge
+│   ├── step_functions/            # Sample Step Function JSON
+│   │   └── daily_risk_pipeline.json
+│   └── emr_migration/            # Sample EMR cluster config
+│       └── cluster_config.json
+├── docs/
+│   ├── QUICKSTART.md              # 5-minute getting started
+│   ├── MIGRATION_PLAYBOOK.md      # 6-phase methodology (20KB guide)
+│   ├── PIPELINE_YAML_REFERENCE.md # Complete YAML field reference
+│   ├── MODULE_REFERENCE.md        # Detailed API docs
+│   ├── STAKEHOLDER_TEMPLATES.md   # Interview forms, SLA capture, RACI
+│   ├── CUTOVER_PLAYBOOK.md        # Zero-downtime patterns, rollback
+│   └── pr_template_and_review_checklist.md
+├── setup.py
+├── requirements.txt
+└── README.md                      # ← You are here (v2.1)
+```
+
+---
+
+## Appendix: YAML Spec Reference
+
+### Complete Field Reference
+
+```yaml
+# ═══ IDENTITY ═══
+name: string                    # Required. Pipeline identifier
+domain: string                  # Business domain (risk, lending, etc.)
+owner: string                   # Team email or Slack channel
+description: string             # Human-readable description
+layer: bronze|silver|gold       # Medallion layer
+
+# ═══ SOURCE ═══
+source:
+  type: kafka|auto_loader|delta_share|jdbc|mongodb|snowflake|delta_table
+  config:
+    # Kafka
+    topic: string
+    secret_scope: string
+    starting_offsets: latest|earliest
+    max_offsets: string
+
+    # Auto Loader
+    path: string                # /Volumes/catalog/schema/volume/
+    format: csv|json|parquet|avro|xml
+    header: "true"|"false"
+
+    # Delta Share
+    share_name: string
+    schema: string
+    table: string
+
+    # JDBC (PostgreSQL, MySQL, Oracle)
+    secret_scope: string
+    source_table: string
+    partition_column: string
+    num_partitions: int
+
+    # MongoDB
+    connection_uri_secret: string
+    database: string
+    collection: string
+    pipeline: string            # Aggregation pipeline JSON
+
+    # Snowflake
+    secret_scope: string
+    warehouse: string
+    database: string
+    schema: string
+    table: string
+
+# ═══ TARGET ═══
+target:
+  catalog: string               # Unity Catalog catalog name
+  schema: string                # Schema name
+  table: string                 # Table name (defaults to pipeline name)
+  mode: streaming|batch|merge   # Write mode
+  partition_by: [string]        # Partition columns
+  z_order_by: [string]          # Z-ORDER columns
+  merge_keys: [string]          # Keys for MERGE mode
+  scd_type: 1|2                 # Slowly changing dimension type
+  soft_delete: true|false       # Mark deleted vs physical delete
+
+# ═══ DATA QUALITY ═══
+quality:
+  - name: string                # Rule identifier
+    condition: string           # SQL expression (must evaluate to boolean)
+    action: warn|drop|quarantine|fail
+    threshold: float            # 0.0-1.0 (what % must pass)
+
+# ═══ GOVERNANCE ═══
+governance:
+  classification: public|internal|confidential|mnpi
+  embargo_hours: int            # Hours before data becomes visible
+  mnpi_columns: [string]        # Columns with MNPI data
+  column_masks:                 # column_name: masked_value
+    column_name: "expression"
+  row_filter: string            # SQL condition for row-level filter
+  owner_group: string           # Group with unrestricted access
+
+# ═══ COMPUTE ═══
+compute:
+  type: serverless|job_cluster|existing
+  photon: true|false
+  node_type: string             # e.g., i3.xlarge
+  min_workers: int
+  max_workers: int
+
+# ═══ SCHEDULE ═══
+schedule:
+  cron: string                  # Standard cron (5-field)
+  timezone: string              # e.g., America/New_York
+  sla_minutes: int              # Max acceptable latency
+
+# ═══ RETRY ═══
+retry:
+  max_attempts: int             # Default: 3
+  backoff_seconds: int          # Default: 60
+
+# ═══ ALERTING ═══
+alerting:
+  on_failure: [string]          # e.g., [slack:#alerts, pagerduty:team]
+  on_sla_breach: [string]
+  on_success: [string]
+
+# ═══ DEPENDENCIES ═══
+depends_on: [string]            # Upstream pipeline names
+
+# ═══ TRANSFORMATION ═══
+transform_sql: string           # Optional SQL for Silver-layer transformation
+
+# ═══ TAGS ═══
+tags:
+  cost_center: string
+  criticality: low|medium|high|critical
+  regulatory: string            # e.g., mifid2, sox, gdpr
+```
+
+### Pilot Examples
+
+**Simple Pipeline** (`examples/pilot/simple_pipeline.yaml`): CSV file ingestion via Auto Loader into Bronze. Demonstrates basic DQ rules, serverless compute, and scheduling.
+
+**Complex Pipeline** (`examples/pilot/complex_pipeline.yaml`): Kafka streaming with MNPI governance (column masks, row filters, embargo), multi-worker job cluster, PagerDuty alerting, and dependency chaining.
+
+---
+
+## Sample Project: End-to-End Demo
+
+The `aws-sample-data-project/` directory contains a **realistic representation** of a financial services AWS data platform with 12 pipelines. Use it to see the accelerator in action.
+
+### What's Inside
+
+| File | Represents |
+|------|-----------|
+| `airflow/dags/daily_risk_aggregation.py` | Airflow DAG with S3 sensors + EMR steps (Kafka → aggregate) |
+| `airflow/dags/loan_application_etl.py` | Hourly Glue JDBC extract (PostgreSQL, PII data) |
+| `airflow/dags/customer_360.py` | Multi-source fusion (RDS + MongoDB + S3) |
+| `step_functions/customer_360_pipeline.json` | Parallel + Choice + EMR + Lambda orchestration |
+| `step_functions/compliance_report.json` | Wait loop + conditional + EMR reporting |
+| `emr_jobs/trade_events_streaming.sh` | Continuous Kafka streaming (8 executors, dynamic alloc) |
+| `emr_jobs/market_data_feed.sh` | 1-minute micro-batch from Kafka |
+| `emr_jobs/customer_churn_model.sh` | Weekly ML training (GPU cluster, XGBoost) |
+| `glue_jobs/vendor_file_ingestion.py` | S3 CSV landing zone → Parquet (triggered) |
+| `glue_jobs/payment_processing.py` | 15-min JDBC incremental with PII masking |
+| `config/environment.json` | Full AWS environment (4 EMR clusters, costs, team) |
+| `s3_schemas/*.json` | Source file schemas with quality rules |
+
+### Run the Migration Demo
+
+```python
+# The walkthrough demonstrates the COMPLETE workflow (no manual YAML writing):
+exec(open("aws-sample-data-project/MIGRATION_WALKTHROUGH.py").read())
+
+# Or step by step:
+from aws2lakehouse.factory.spec_generator import SpecGenerator
+from aws2lakehouse.factory import PipelineFactory
+
+# 1. Scanners auto-populate inventory (simulated in walkthrough)
+pipeline_inventory = [...]  # From AirflowScanner, SparkSubmitParser, etc.
+
+# 2. SpecGenerator converts inventory → specs (ZERO manual YAML)
+generator = SpecGenerator(catalog="production")
+specs = generator.from_inventory(pipeline_inventory)
+
+# 3. Factory generates ALL artifacts
+factory = PipelineFactory(catalog="production")
+for spec in specs:
+    artifacts = factory.generate(spec)
+    # artifacts.notebook_code, .job_yaml, .dq_sql, .governance_sql, .test_code
+
+# 4. Deploy
+# databricks bundle deploy --target production
+```
+
+### The Key Insight
+
+You **never manually write YAML** for each pipeline. The flow is:
+
+```
+Scan (AWS APIs) → Inventory (Delta table) → SpecGenerator → Factory → Deploy
+```
+
+The `SpecGenerator` auto-generates quality rules, column masks, compute sizing, and scheduling from the metadata your scanners already collected.
+
+---
+
+## Documentation Index
+
+| Document | Purpose | Location |
+|----------|---------|----------|
+| **This README** | Complete usage guide | `README.md` |
+| Quick Start | 5-minute demo | `docs/QUICKSTART.md` |
+| Migration Playbook | 6-phase methodology | `docs/MIGRATION_PLAYBOOK.md` |
+| YAML Reference | All spec fields | `docs/PIPELINE_YAML_REFERENCE.md` |
+| Module Reference | API documentation | `docs/MODULE_REFERENCE.md` |
+| Stakeholder Templates | Interviews, SLA, RACI | `docs/STAKEHOLDER_TEMPLATES.md` |
+| Cutover Playbook | Zero-downtime patterns | `docs/CUTOVER_PLAYBOOK.md` |
+| PR Template | Code review checklist | `docs/pr_template_and_review_checklist.md` |
+
+---
+
+## Support
+
+**Author:** Krish Kilaru / Lumenalta  
+**Version:** 2.1.0 (Code-reviewed, production-hardened)  
+**License:** Proprietary  
+**Questions:** Open an issue or contact the migration team.
+
+---
+
+## Changelog
+
+### v2.1.0 — Code Review Release
+
+**26 issues resolved** across 5 core modules:
+
+* 1 Critical fix (duplicate variable shadowing in docs generator)
+* 8 High-priority fixes (streaming syntax, AI resilience, error handling)
+* 9 Medium-priority fixes (domain extraction, wave planning, cron parsing)
+* 5 Low-priority enhancements (--dry-run, --threads, content detection, token reporting, type inference)
+* 1 Suggestion implemented (parallel ThreadPoolExecutor for AI calls)
+
+**Files modified:** `migrate.py`, `factory/__init__.py`, `factory/spec_generator.py`, `genai/ai_client.py`, `docs_generator.py`
+
+**Verification:** All 5 files pass AST syntax check. All 4 sample repos generate successfully (182 files total). Unit tests pass for edge cases.
+
+### v2.0.0 — Initial Release
+
+* 15 core modules (discovery → factory → governance → observability)
+* One-command CLI (`migrate.py`)
+* AI-powered enhancement via Foundation Models
+* 7 auto-generated project docs
+* 4 sample AWS source repos with end-to-end demos

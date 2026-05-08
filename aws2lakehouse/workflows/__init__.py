@@ -9,8 +9,8 @@ Pre-built workflow templates for common migration patterns:
 - Backfill workflow (historical data reprocessing)
 """
 
-from typing import Dict, List, Optional
 from dataclasses import dataclass, field
+from typing import Optional
 
 
 @dataclass
@@ -18,8 +18,8 @@ class WorkflowTask:
     """Task in a Databricks Workflow."""
     task_key: str
     notebook_path: str
-    depends_on: List[str] = field(default_factory=list)
-    parameters: Dict[str, str] = field(default_factory=dict)
+    depends_on: list[str] = field(default_factory=list)
+    parameters: dict[str, str] = field(default_factory=dict)
     condition: Optional[str] = None  # run_if condition
     cluster_type: str = "serverless"  # serverless | job_cluster | existing
     max_retries: int = 2
@@ -28,14 +28,32 @@ class WorkflowTask:
 
 class WorkflowTemplates:
     """Pre-built Databricks Workflow YAML templates."""
-    
+
     @staticmethod
-    def medallion_pipeline(name: str, domain: str, tables: List[str],
+    def _parse_schedule_to_quartz(schedule: str) -> str:
+        """Safely parse a cron/preset schedule to a Quartz cron expression."""
+        presets = {
+            "@daily": "0 0 6 * * ? *",
+            "@hourly": "0 0 * * * ? *",
+            "@weekly": "0 0 0 ? * MON *",
+            "@monthly": "0 0 0 1 * ? *",
+            "continuous": "0 0 6 * * ? *",
+            "triggered": "0 0 6 * * ? *",
+        }
+        if schedule in presets:
+            return presets[schedule]
+        parts = schedule.split()
+        if len(parts) >= 2:
+            return f"0 {parts[0]} {parts[1]} ? * * *"
+        return "0 0 6 * * ? *"  # default daily 6am
+
+    @staticmethod
+    def medallion_pipeline(name: str, domain: str, tables: list[str],
                            catalog: str = "production",
                            schedule: str = "0 6 * * *") -> str:
         """
         Standard Medallion Pipeline: Bronze → Silver → Gold for multiple tables.
-        
+
         Generates a multi-task workflow where:
         - Bronze tasks run in parallel (one per source table)
         - Silver tasks depend on their Bronze counterpart
@@ -43,7 +61,7 @@ class WorkflowTemplates:
         """
         bronze_tasks = []
         silver_tasks = []
-        
+
         for table in tables:
             bronze_tasks.append(f"""        - task_key: bronze_{table}
           notebook_task:
@@ -53,7 +71,7 @@ class WorkflowTemplates:
               TABLE: "{table}"
           max_retries: 2
           timeout_seconds: 1800""")
-            
+
             silver_tasks.append(f"""        - task_key: silver_{table}
           notebook_task:
             notebook_path: /pipelines/{domain}/silver/{table}
@@ -64,25 +82,25 @@ class WorkflowTemplates:
             - task_key: bronze_{table}
           max_retries: 1
           timeout_seconds: 3600""")
-        
+
         gold_deps = "\n".join([f"            - task_key: silver_{t}" for t in tables])
-        
+
         return f"""# Medallion Pipeline: {domain}
 resources:
   jobs:
     {name}:
       name: "[prod] {domain}/medallion_pipeline"
       schedule:
-        quartz_cron_expression: "0 {schedule.split()[0]} {schedule.split()[1]} ? * * *"
+        quartz_cron_expression: "{WorkflowTemplates._parse_schedule_to_quartz(schedule)}"
         timezone_id: "America/New_York"
-      
+
       tasks:
         # ═══ BRONZE LAYER (parallel ingestion) ═══
 {chr(10).join(bronze_tasks)}
-        
+
         # ═══ SILVER LAYER (sequential per table) ═══
 {chr(10).join(silver_tasks)}
-        
+
         # ═══ GOLD LAYER (aggregation after all silver) ═══
         - task_key: gold_aggregation
           notebook_task:
@@ -94,14 +112,14 @@ resources:
 {gold_deps}
           max_retries: 1
           timeout_seconds: 7200
-        
+
         # ═══ QUALITY CHECK ═══
         - task_key: quality_validation
           notebook_task:
             notebook_path: /pipelines/{domain}/quality/validate_all
           depends_on:
             - task_key: gold_aggregation
-      
+
       tags:
         domain: "{domain}"
         pattern: "medallion"
@@ -114,7 +132,7 @@ resources:
                            failure_notebook: str) -> str:
         """
         Conditional Workflow: Run different paths based on a condition.
-        
+
         Pattern: check → IF success THEN process ELSE remediate
         Uses run_if/condition_task for branching.
         """
@@ -129,7 +147,7 @@ resources:
           notebook_task:
             notebook_path: {check_notebook}
           max_retries: 0
-        
+
         # Step 2a: Happy path (condition passed)
         - task_key: process_data
           notebook_task:
@@ -141,7 +159,7 @@ resources:
             op: EQUAL_TO
             left: "{{{{tasks.check_condition.result_state}}}}"
             right: "SUCCESS"
-        
+
         # Step 2b: Remediation path (condition failed)
         - task_key: remediate
           notebook_task:
@@ -153,7 +171,7 @@ resources:
             op: EQUAL_TO
             left: "{{{{tasks.check_condition.result_state}}}}"
             right: "FAILED"
-        
+
         # Step 3: Always notify
         - task_key: notify
           notebook_task:
@@ -167,12 +185,12 @@ resources:
 
     @staticmethod
     def for_each_workflow(name: str, domain: str,
-                         tables: List[str],
+                         tables: list[str],
                          notebook_path: str,
                          schedule: str = "0 6 * * *") -> str:
         """
         For-Each Workflow: Process multiple items with the same logic.
-        
+
         Pattern: Same notebook runs for each table/entity, parameterized.
         Uses for_each_task pattern.
         """
@@ -182,9 +200,9 @@ resources:
     {name}:
       name: "[prod] {domain}/{name}"
       schedule:
-        quartz_cron_expression: "0 {schedule.split()[0]} {schedule.split()[1]} ? * * *"
+        quartz_cron_expression: "{WorkflowTemplates._parse_schedule_to_quartz(schedule)}"
         timezone_id: "UTC"
-      
+
       tasks:
         - task_key: process_all_tables
           for_each_task:
@@ -207,7 +225,7 @@ resources:
                          parallelism: int = 5) -> str:
         """
         Backfill Workflow: Reprocess historical data in date-partitioned chunks.
-        
+
         Generates date ranges and processes them with controlled parallelism.
         """
         return f"""# Backfill Workflow: {name}
@@ -217,7 +235,7 @@ resources:
     {name}:
       name: "[prod] backfill/{table}"
       max_concurrent_runs: 1
-      
+
       tasks:
         - task_key: generate_date_ranges
           notebook_task:
@@ -226,7 +244,7 @@ resources:
               START_DATE: "{start_date}"
               END_DATE: "{end_date}"
               CHUNK_DAYS: "7"
-        
+
         - task_key: backfill_chunks
           depends_on:
             - task_key: generate_date_ranges
@@ -243,7 +261,7 @@ resources:
                   END: "{{{{input.end}}}}"
                   MODE: "backfill"
           max_retries: 2
-        
+
         - task_key: validate_backfill
           depends_on:
             - task_key: backfill_chunks
@@ -262,7 +280,7 @@ resources:
                            validation_notebook: str) -> str:
         """
         Dual-Write Cutover: Run both old and new pipelines, compare results.
-        
+
         Pattern for zero-downtime migration validation:
         1. Run legacy pipeline (continues producing)
         2. Run new pipeline (shadow mode)
@@ -280,11 +298,11 @@ resources:
         - task_key: legacy_pipeline
           notebook_task:
             notebook_path: {legacy_notebook}
-        
+
         - task_key: new_pipeline
           notebook_task:
             notebook_path: {new_notebook}
-        
+
         # Compare outputs after both complete
         - task_key: validate_match
           notebook_task:
@@ -296,7 +314,7 @@ resources:
           depends_on:
             - task_key: legacy_pipeline
             - task_key: new_pipeline
-        
+
         # Alert if mismatch
         - task_key: alert_on_mismatch
           notebook_task:
@@ -312,12 +330,12 @@ resources:
 
 class FolderStructureGenerator:
     """Generate standardized project folder structure."""
-    
+
     @staticmethod
-    def generate(org: str, domains: List[str], environments: List[str] = None) -> str:
+    def generate(org: str, domains: list[str], environments: list[str] = None) -> str:
         """Generate the recommended folder structure as a tree."""
         environments = environments or ["dev", "staging", "production"]
-        
+
         tree = f"""# Recommended Project Structure for {org}
 #
 # /Workspace/Repos/{org}-data-platform/
@@ -340,7 +358,7 @@ class FolderStructureGenerator:
 # │   │   │   ├── gold/                # Aggregation notebooks
 # │   │   │   └── quality/             # DQ validation notebooks
 """
-        tree += f"""# │   ├── common/                      # Shared utilities
+        tree += """# │   ├── common/                      # Shared utilities
 # │   │   ├── notify_completion.py
 # │   │   ├── validate_backfill.py
 # │   │   └── generate_date_ranges.py
@@ -362,9 +380,9 @@ class FolderStructureGenerator:
 #         └── deploy.yml
 """
         return tree
-    
+
     @staticmethod
-    def generate_setup_script(org: str, domains: List[str]) -> str:
+    def generate_setup_script(org: str, domains: list[str]) -> str:
         """Generate a shell script to create the folder structure."""
         lines = ["#!/bin/bash", f"# Setup folder structure for {org}", ""]
         dirs = [
@@ -381,10 +399,10 @@ class FolderStructureGenerator:
                 f"src/pipelines/{domain}/quality",
                 f"specs/{domain}",
             ])
-        
+
         for d in sorted(dirs):
             lines.append(f"mkdir -p {d}")
-        
+
         lines.append("")
         lines.append("echo '✅ Project structure created'")
         return "\n".join(lines)

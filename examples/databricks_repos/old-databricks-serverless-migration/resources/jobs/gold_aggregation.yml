@@ -1,0 +1,19 @@
+resources:
+  jobs:
+    gold_aggregation:
+      name: "[prod] finance/gold_aggregation"
+      description: "Migrated from AWS: auto_loader → finance_bronze"
+      tasks:
+        - task_key: gold_aggregation
+          notebook_task:
+            notebook_path: pipelines/finance/gold_aggregation
+            base_parameters:
+              CATALOG: "acme_prod"
+              SCHEMA: "finance_bronze"
+              TABLE: "gold_aggregation"
+          max_retries: 2
+          timeout_seconds: 3600
+      tags:
+        domain: "finance"
+        layer: "bronze"
+        classification: "internal"

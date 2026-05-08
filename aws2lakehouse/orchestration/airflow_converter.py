@@ -19,10 +19,9 @@ Usage:
 """
 
 import ast
-import re
-from typing import Dict, List, Optional, Tuple, Set
-from dataclasses import dataclass, field
 import logging
+from dataclasses import dataclass, field
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -35,13 +34,13 @@ class AirflowTask:
     python_callable: Optional[str] = None
     bash_command: Optional[str] = None
     sql: Optional[str] = None
-    params: Dict = field(default_factory=dict)
+    params: dict = field(default_factory=dict)
     retries: int = 0
     retry_delay_seconds: int = 300
     timeout_seconds: int = 3600
     trigger_rule: str = "all_success"
-    upstream: List[str] = field(default_factory=list)
-    downstream: List[str] = field(default_factory=list)
+    upstream: list[str] = field(default_factory=list)
+    downstream: list[str] = field(default_factory=list)
     task_group: Optional[str] = None
 
 
@@ -52,13 +51,13 @@ class AirflowDAG:
     schedule_interval: Optional[str] = None
     start_date: Optional[str] = None
     catchup: bool = False
-    default_args: Dict = field(default_factory=dict)
-    tasks: List[AirflowTask] = field(default_factory=list)
+    default_args: dict = field(default_factory=dict)
+    tasks: list[AirflowTask] = field(default_factory=list)
     description: str = ""
-    tags: List[str] = field(default_factory=list)
-    
+    tags: list[str] = field(default_factory=list)
+
     @property
-    def task_map(self) -> Dict[str, AirflowTask]:
+    def task_map(self) -> dict[str, AirflowTask]:
         return {t.task_id: t for t in self.tasks}
 
 
@@ -67,10 +66,10 @@ class LakeflowTask:
     """Databricks Lakeflow Job task."""
     task_key: str
     notebook_path: str
-    depends_on: List[str] = field(default_factory=list)
+    depends_on: list[str] = field(default_factory=list)
     max_retries: int = 0
     timeout_seconds: int = 3600
-    parameters: Dict = field(default_factory=dict)
+    parameters: dict = field(default_factory=dict)
     description: str = ""
     condition: Optional[str] = None  # For conditional execution
 
@@ -79,51 +78,51 @@ class LakeflowTask:
 class LakeflowJob:
     """Converted Lakeflow Job definition."""
     name: str
-    tasks: List[LakeflowTask] = field(default_factory=list)
-    schedule: Optional[Dict] = None
-    tags: Dict[str, str] = field(default_factory=dict)
-    warnings: List[str] = field(default_factory=list)
-    
+    tasks: list[LakeflowTask] = field(default_factory=list)
+    schedule: Optional[dict] = None
+    tags: dict[str, str] = field(default_factory=dict)
+    warnings: list[str] = field(default_factory=list)
+
     def to_yaml(self) -> str:
         """Generate DAB-compatible job YAML."""
         lines = ["resources:", "  jobs:", f"    {self.name.replace(' ', '_').replace('-', '_')}:"]
         lines.append(f"      name: \"{self.name}\"")
-        
+
         if self.schedule:
             lines.append("      schedule:")
             lines.append(f"        quartz_cron_expression: \"{self.schedule.get('quartz_cron', '0 0 6 * * ? *')}\"")
             lines.append(f"        timezone_id: \"{self.schedule.get('timezone', 'UTC')}\"")
-        
+
         lines.append("      tasks:")
         for task in self.tasks:
             lines.append(f"        - task_key: {task.task_key}")
-            lines.append(f"          notebook_task:")
+            lines.append("          notebook_task:")
             lines.append(f"            notebook_path: {task.notebook_path}")
             if task.parameters:
-                lines.append(f"            base_parameters:")
+                lines.append("            base_parameters:")
                 for k, v in task.parameters.items():
                     lines.append(f"              {k}: \"{v}\"")
             if task.depends_on:
-                lines.append(f"          depends_on:")
+                lines.append("          depends_on:")
                 for dep in task.depends_on:
                     lines.append(f"            - task_key: {dep}")
             if task.max_retries > 0:
                 lines.append(f"          max_retries: {task.max_retries}")
             if task.timeout_seconds != 3600:
                 lines.append(f"          timeout_seconds: {task.timeout_seconds}")
-        
+
         if self.tags:
             lines.append("      tags:")
             for k, v in self.tags.items():
                 lines.append(f"        {k}: \"{v}\"")
-        
+
         return "\n".join(lines)
 
 
 class AirflowConverter:
     """
     Converts Airflow DAG files to Databricks Lakeflow Jobs.
-    
+
     Supports:
     - PythonOperator -> notebook with python callable code
     - BashOperator -> notebook with %sh magic
@@ -135,7 +134,7 @@ class AirflowConverter:
     - SubDAGs -> warnings for manual review
     - Cron schedules -> Quartz cron
     """
-    
+
     # Operator type mapping
     OPERATOR_MAP = {
         "PythonOperator": "python_notebook",
@@ -160,65 +159,64 @@ class AirflowConverter:
         "DummyOperator": "pass_through",
         "EmptyOperator": "pass_through",
     }
-    
+
     def __init__(self, target_notebook_base: str = "/Workspace/migrated/airflow/"):
         self.target_notebook_base = target_notebook_base.rstrip("/")
-    
+
     def convert_dag_file(self, dag_file_path: str) -> LakeflowJob:
         """Convert an Airflow DAG file to a Lakeflow Job."""
         with open(dag_file_path) as f:
             source = f.read()
         return self.convert_dag_source(source)
-    
+
     def convert_dag_source(self, source: str) -> LakeflowJob:
         """Convert Airflow DAG source code to a Lakeflow Job."""
         dag = self._parse_dag(source)
         return self._convert_dag(dag)
-    
+
     def _parse_dag(self, source: str) -> AirflowDAG:
         """Parse Airflow DAG Python source into structured representation."""
         tree = ast.parse(source)
         dag = AirflowDAG(dag_id="unknown")
-        tasks: Dict[str, AirflowTask] = {}
-        dependencies: List[Tuple[str, str]] = []  # (upstream, downstream)
-        
+        tasks: dict[str, AirflowTask] = {}
+        dependencies: list[tuple[str, str]] = []  # (upstream, downstream)
+
         for node in ast.walk(tree):
             # Find DAG instantiation
             if isinstance(node, ast.Call):
                 func_name = self._get_call_name(node)
                 if func_name == "DAG" or func_name.endswith(".DAG"):
                     dag = self._parse_dag_call(node, dag)
-            
+
             # Find task assignments: task_id = Operator(...)
-            if isinstance(node, ast.Assign):
-                if isinstance(node.value, ast.Call):
-                    func_name = self._get_call_name(node.value)
-                    operator_class = func_name.split(".")[-1] if "." in func_name else func_name
-                    if operator_class in self.OPERATOR_MAP or "Operator" in operator_class or "Sensor" in operator_class:
-                        task = self._parse_task(node, operator_class)
-                        if task:
-                            tasks[task.task_id] = task
-            
+            if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call):
+                func_name = self._get_call_name(node.value)
+                operator_class = func_name.split(".")[-1] if "." in func_name else func_name
+                if operator_class in self.OPERATOR_MAP or "Operator" in operator_class or "Sensor" in operator_class:
+                    task = self._parse_task(node, operator_class)
+                    if task:
+                        tasks[task.task_id] = task
+
             # Find dependencies: task1 >> task2
             if isinstance(node, ast.Expr) and isinstance(node.value, ast.BinOp):
                 deps = self._parse_bitshift_deps(node.value)
                 dependencies.extend(deps)
-        
+
         # Apply dependencies
         for upstream_id, downstream_id in dependencies:
             if upstream_id in tasks:
                 tasks[upstream_id].downstream.append(downstream_id)
             if downstream_id in tasks:
                 tasks[downstream_id].upstream.append(upstream_id)
-        
+
         dag.tasks = list(tasks.values())
         return dag
-    
+
     def _parse_dag_call(self, node: ast.Call, dag: AirflowDAG) -> AirflowDAG:
         """Parse DAG() constructor call."""
         if node.args:
             dag.dag_id = self._get_string_value(node.args[0])
-        
+
         for kw in node.keywords:
             if kw.arg == "dag_id":
                 dag.dag_id = self._get_string_value(kw.value)
@@ -232,18 +230,18 @@ class AirflowConverter:
                 dag.tags = self._get_list_values(kw.value)
             elif kw.arg == "default_args":
                 dag.default_args = self._get_dict_value(kw.value)
-        
+
         return dag
-    
+
     def _parse_task(self, node: ast.Assign, operator_class: str) -> Optional[AirflowTask]:
         """Parse a task assignment."""
         call = node.value
         task = AirflowTask(task_id="", operator_type=operator_class)
-        
+
         # Get variable name as fallback task_id
         if node.targets and isinstance(node.targets[0], ast.Name):
             task.task_id = node.targets[0].id
-        
+
         for kw in call.keywords:
             if kw.arg == "task_id":
                 task.task_id = self._get_string_value(kw.value)
@@ -261,10 +259,10 @@ class AirflowConverter:
                 task.trigger_rule = self._get_string_value(kw.value)
             elif kw.arg == "op_kwargs" or kw.arg == "params":
                 task.params = self._get_dict_value(kw.value)
-        
+
         return task if task.task_id else None
-    
-    def _parse_bitshift_deps(self, node: ast.BinOp) -> List[Tuple[str, str]]:
+
+    def _parse_bitshift_deps(self, node: ast.BinOp) -> list[tuple[str, str]]:
         """Parse task1 >> task2 >> task3 dependency chains."""
         deps = []
         if isinstance(node.op, ast.RShift):
@@ -277,8 +275,8 @@ class AirflowConverter:
             if isinstance(node.left, ast.BinOp):
                 deps.extend(self._parse_bitshift_deps(node.left))
         return deps
-    
-    def _get_task_ids(self, node) -> List[str]:
+
+    def _get_task_ids(self, node) -> list[str]:
         """Extract task IDs from AST node."""
         if isinstance(node, ast.Name):
             return [node.id]
@@ -287,31 +285,31 @@ class AirflowConverter:
         elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.RShift):
             return self._get_task_ids(node.right)
         return []
-    
+
     def _convert_dag(self, dag: AirflowDAG) -> LakeflowJob:
         """Convert parsed DAG to Lakeflow Job."""
         job = LakeflowJob(
             name=dag.dag_id,
             tags={"source": "airflow", "original_dag": dag.dag_id},
         )
-        
+
         if dag.tags:
             for tag in dag.tags:
                 job.tags[tag] = "true"
-        
+
         # Convert schedule
         if dag.schedule_interval:
             job.schedule = {
                 "quartz_cron": self._airflow_to_quartz(dag.schedule_interval),
                 "timezone": dag.default_args.get("timezone", "UTC"),
             }
-        
+
         # Convert tasks
         for task in dag.tasks:
             lf_task = self._convert_task(task, dag)
             if lf_task:
                 job.tasks.append(lf_task)
-        
+
         # Add warnings for complex patterns
         for task in dag.tasks:
             if "Sensor" in task.operator_type:
@@ -320,24 +318,24 @@ class AirflowConverter:
                 job.warnings.append(f"SubDAG '{task.task_id}' - flatten into main job or create separate job")
             if task.trigger_rule != "all_success":
                 job.warnings.append(f"Task '{task.task_id}' has trigger_rule='{task.trigger_rule}' - review condition logic")
-        
+
         return job
-    
+
     def _convert_task(self, task: AirflowTask, dag: AirflowDAG) -> Optional[LakeflowTask]:
         """Convert a single Airflow task to Lakeflow task."""
         task_type = self.OPERATOR_MAP.get(task.operator_type, "python_notebook")
-        
+
         if task_type == "pass_through":
             # DummyOperator/EmptyOperator - skip but preserve deps
             return None
-        
+
         notebook_path = f"{self.target_notebook_base}/{dag.dag_id}/{task.task_id}"
-        
+
         # Map dependencies (skip DummyOperators)
-        depends_on = [dep for dep in task.upstream 
-                      if dep in dag.task_map and 
+        depends_on = [dep for dep in task.upstream
+                      if dep in dag.task_map and
                       dag.task_map[dep].operator_type not in ("DummyOperator", "EmptyOperator")]
-        
+
         lf_task = LakeflowTask(
             task_key=task.task_id.replace("-", "_"),
             notebook_path=notebook_path,
@@ -347,9 +345,9 @@ class AirflowConverter:
             parameters=task.params,
             description=f"Migrated from Airflow: {task.operator_type}",
         )
-        
+
         return lf_task
-    
+
     def generate_task_notebook(self, task: AirflowTask, dag: AirflowDAG) -> str:
         """Generate notebook code for a converted task."""
         lines = [
@@ -359,7 +357,7 @@ class AirflowConverter:
             f"# Task ID: {task.task_id}",
             "",
         ]
-        
+
         if task.python_callable:
             lines.append(f"# Original python_callable: {task.python_callable}")
             lines.append("# TODO: Port the function logic below")
@@ -373,9 +371,9 @@ class AirflowConverter:
             lines.append(f"# {task.sql}")
         else:
             lines.append("# TODO: Implement task logic")
-        
+
         return "\n".join(lines)
-    
+
     # Helper methods
     def _airflow_to_quartz(self, schedule: str) -> str:
         """Convert Airflow schedule to Quartz cron."""
@@ -397,7 +395,7 @@ class AirflowConverter:
             dom = "?" if dow != "?" else parts[2]
             return f"0 {parts[0]} {parts[1]} {dom} {parts[3]} {dow} *"
         return schedule
-    
+
     @staticmethod
     def _get_call_name(node: ast.Call) -> str:
         if isinstance(node.func, ast.Name):
@@ -405,25 +403,25 @@ class AirflowConverter:
         elif isinstance(node.func, ast.Attribute):
             return node.func.attr
         return ""
-    
+
     @staticmethod
     def _get_string_value(node) -> str:
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
             return node.value
         return ""
-    
+
     @staticmethod
     def _get_int_value(node) -> int:
         if isinstance(node, ast.Constant) and isinstance(node.value, int):
             return node.value
         return 0
-    
+
     @staticmethod
     def _get_bool_value(node) -> bool:
         if isinstance(node, ast.Constant):
             return bool(node.value)
         return False
-    
+
     @staticmethod
     def _get_name_value(node) -> str:
         if isinstance(node, ast.Name):
@@ -431,15 +429,15 @@ class AirflowConverter:
         elif isinstance(node, ast.Attribute):
             return node.attr
         return ""
-    
+
     @staticmethod
-    def _get_list_values(node) -> List[str]:
+    def _get_list_values(node) -> list[str]:
         if isinstance(node, ast.List):
             return [AirflowConverter._get_string_value(e) for e in node.elts]
         return []
-    
+
     @staticmethod
-    def _get_dict_value(node) -> Dict:
+    def _get_dict_value(node) -> dict:
         if isinstance(node, ast.Dict):
             result = {}
             for k, v in zip(node.keys, node.values):

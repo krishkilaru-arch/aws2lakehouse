@@ -9,17 +9,15 @@ Creates views and tables for:
 - Dependency visualization
 """
 
-from typing import Dict, List
-
 
 class WavePlanningDashboard:
     """Generates SQL for a migration wave planning dashboard."""
-    
+
     def __init__(self, catalog: str = "production", schema: str = "migration_tracking"):
         self.catalog = catalog
         self.schema = schema
         self.fqn = f"{catalog}.{schema}"
-    
+
     def generate_all_sql(self) -> str:
         """Generate complete wave planning dashboard SQL."""
         return "\n\n".join([
@@ -33,12 +31,12 @@ class WavePlanningDashboard:
             self._effort_burndown_view(),
             self._dependency_view(),
         ])
-    
+
     def _schema_setup(self) -> str:
         return f"""-- Wave Planning Dashboard
 CREATE SCHEMA IF NOT EXISTS {self.fqn};
 USE SCHEMA {self.fqn};"""
-    
+
     def _pipeline_inventory_table(self) -> str:
         return f"""
 -- Pipeline Inventory (populated by discovery phase)
@@ -65,7 +63,7 @@ CREATE TABLE IF NOT EXISTS {self.fqn}.pipeline_inventory (
   _created_at TIMESTAMP DEFAULT current_timestamp(),
   _updated_at TIMESTAMP
 ) USING DELTA;"""
-    
+
     def _wave_assignments_table(self) -> str:
         return f"""
 -- Wave Configuration
@@ -81,7 +79,7 @@ CREATE TABLE IF NOT EXISTS {self.fqn}.wave_config (
   risk_level STRING,             -- low, medium, high
   notes STRING
 ) USING DELTA;"""
-    
+
     def _migration_progress_table(self) -> str:
         return f"""
 -- Daily Progress Log (append daily)
@@ -98,7 +96,7 @@ CREATE TABLE IF NOT EXISTS {self.fqn}.migration_progress (
   _recorded_at TIMESTAMP DEFAULT current_timestamp()
 ) USING DELTA
 PARTITIONED BY (log_date);"""
-    
+
     def _inventory_summary_view(self) -> str:
         return f"""
 -- Dashboard: Inventory Summary (tile metrics)
@@ -114,7 +112,7 @@ SELECT
   COUNT(CASE WHEN mnpi_classification = 'mnpi' THEN 1 END) as mnpi_pipelines,
   ROUND(AVG(complexity_score), 1) as avg_complexity
 FROM {self.fqn}.pipeline_inventory;"""
-    
+
     def _wave_progress_view(self) -> str:
         return f"""
 -- Dashboard: Wave Progress (bar chart)
@@ -128,14 +126,14 @@ SELECT
   COUNT(CASE WHEN p.migration_status = 'in_progress' THEN 1 END) as in_progress,
   COUNT(CASE WHEN p.migration_status = 'blocked' THEN 1 END) as blocked,
   ROUND(
-    COUNT(CASE WHEN p.migration_status = 'complete' THEN 1 END) * 100.0 
+    COUNT(CASE WHEN p.migration_status = 'complete' THEN 1 END) * 100.0
     / NULLIF(COUNT(*), 0), 1
   ) as completion_pct
 FROM {self.fqn}.wave_config w
 LEFT JOIN {self.fqn}.pipeline_inventory p ON p.wave_number = w.wave_number
 GROUP BY w.wave_number, w.wave_name, w.status
 ORDER BY w.wave_number;"""
-    
+
     def _risk_heatmap_view(self) -> str:
         return f"""
 -- Dashboard: Risk Heatmap (domain x complexity)
@@ -154,10 +152,10 @@ SELECT
   END as risk_color
 FROM {self.fqn}.pipeline_inventory
 GROUP BY domain, complexity_category, business_impact
-ORDER BY 
+ORDER BY
   CASE risk_color WHEN 'RED' THEN 1 WHEN 'AMBER' THEN 2 ELSE 3 END,
   pipeline_count DESC;"""
-    
+
     def _effort_burndown_view(self) -> str:
         return f"""
 -- Dashboard: Effort Burndown (line chart)
@@ -170,7 +168,7 @@ SELECT
 FROM {self.fqn}.migration_progress
 GROUP BY log_date
 ORDER BY log_date;"""
-    
+
     def _dependency_view(self) -> str:
         return f"""
 -- Dashboard: Dependency Map
@@ -182,12 +180,12 @@ SELECT
   p.migration_status,
   dep.dependency as depends_on_pipeline,
   dep_p.migration_status as dependency_status,
-  CASE 
+  CASE
     WHEN dep_p.migration_status = 'complete' THEN 'RESOLVED'
     WHEN dep_p.migration_status = 'blocked' THEN 'BLOCKED'
     ELSE 'PENDING'
   END as dependency_state
 FROM {self.fqn}.pipeline_inventory p
 LATERAL VIEW explode(p.dependencies) dep AS dependency
-LEFT JOIN {self.fqn}.pipeline_inventory dep_p 
+LEFT JOIN {self.fqn}.pipeline_inventory dep_p
   ON dep_p.pipeline_name = dep.dependency;"""

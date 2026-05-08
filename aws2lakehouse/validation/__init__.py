@@ -22,7 +22,6 @@ Usage:
     )
 """
 
-from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass, field
 
 
@@ -37,28 +36,28 @@ class ValidationResult:
     details: str = ""
 
 
-@dataclass 
+@dataclass
 class ValidationReport:
     """Complete validation report for a pipeline migration."""
     pipeline_name: str
     source_table: str
     target_table: str
-    results: List[ValidationResult] = field(default_factory=list)
-    
+    results: list[ValidationResult] = field(default_factory=list)
+
     @property
     def passed(self) -> int:
         return sum(1 for r in self.results if r.status == "PASS")
-    
+
     @property
     def failed(self) -> int:
         return sum(1 for r in self.results if r.status == "FAIL")
-    
+
     @property
     def overall_status(self) -> str:
         if self.failed > 0:
             return "FAIL"
         return "PASS"
-    
+
     def to_summary(self) -> str:
         lines = [
             f"Validation: {self.pipeline_name}",
@@ -81,15 +80,15 @@ class MigrationValidator:
     Validates migrated pipeline outputs against source system.
     Generates complete Databricks notebooks for automated comparison.
     """
-    
+
     def generate_validation_notebook(self, pipeline_name: str,
                                      source_table: str, target_table: str,
                                      primary_key: str = "id",
-                                     numeric_columns: List[str] = None,
+                                     numeric_columns: list[str] = None,
                                      tolerance: float = 0.001) -> str:
         """
         Generate a complete validation notebook (Databricks notebook source format).
-        
+
         Checks performed:
           1. Row count comparison (within tolerance)
           2. Schema comparison (detect missing columns)
@@ -97,7 +96,7 @@ class MigrationValidator:
           4. Duplicate check on primary key
           5. Null key check
           6. Summary report
-          
+
         Args:
             pipeline_name: Name for the report
             source_table: Fully qualified source table
@@ -107,13 +106,13 @@ class MigrationValidator:
             tolerance: Acceptable difference percentage (0.001 = 0.1%)
         """
         num_cols_str = str(numeric_columns) if numeric_columns else "[]"
-        
+
         return f'''# Databricks notebook source
 # MAGIC %md
 # MAGIC # Migration Validation: {pipeline_name}
-# MAGIC **Source:** `{source_table}`  
-# MAGIC **Target:** `{target_table}`  
-# MAGIC **Primary Key:** `{primary_key}`  
+# MAGIC **Source:** `{source_table}`
+# MAGIC **Target:** `{target_table}`
+# MAGIC **Primary Key:** `{primary_key}`
 # MAGIC **Tolerance:** {tolerance * 100}%
 
 # COMMAND ----------
@@ -156,7 +155,7 @@ target_schema = {{f.name: str(f.dataType) for f in target_df.schema.fields if no
 
 missing_cols = set(source_schema.keys()) - set(target_schema.keys())
 extra_cols = set(target_schema.keys()) - set(source_schema.keys())
-type_mismatches = [(c, source_schema[c], target_schema[c]) 
+type_mismatches = [(c, source_schema[c], target_schema[c])
                    for c in source_schema if c in target_schema and source_schema[c] != target_schema[c]]
 
 if missing_cols:
@@ -187,11 +186,11 @@ for col in numeric_cols[:10]:
     try:
         src = source_df.agg(F.sum(col).alias("s"), F.avg(col).alias("a")).collect()[0]
         tgt = target_df.agg(F.sum(col).alias("s"), F.avg(col).alias("a")).collect()[0]
-        
+
         src_sum = float(src["s"] or 0)
         tgt_sum = float(tgt["s"] or 0)
         pct_diff = abs(src_sum - tgt_sum) / max(abs(src_sum), 1) * 100
-        
+
         status = "PASS" if pct_diff < {tolerance * 100} else "FAIL"
         results.append((f"SUM({{col}})", status, f"{{src_sum:.2f}}", f"{{tgt_sum:.2f}}", f"{{pct_diff:.4f}}%"))
         print(f"  {{col}}: diff={{pct_diff:.4f}}% -> {{status}}")
@@ -253,10 +252,10 @@ else:
 dbutils.notebook.exit("PASS" if failed == 0 else "FAIL")
 '''
 
-    def generate_batch_validation_notebook(self, validations: List[Dict]) -> str:
+    def generate_batch_validation_notebook(self, validations: list[dict]) -> str:
         """
         Generate a notebook that validates multiple tables in sequence.
-        
+
         Args:
             validations: List of dicts with keys:
                 - pipeline_name, source_table, target_table, primary_key
@@ -265,7 +264,7 @@ dbutils.notebook.exit("PASS" if failed == 0 else "FAIL")
             f'    {{"pipeline": "{v["pipeline_name"]}", "source": "{v["source_table"]}", "target": "{v["target_table"]}", "pk": "{v["primary_key"]}"}},'
             for v in validations
         ])
-        
+
         return f'''# Databricks notebook source
 # MAGIC %md
 # MAGIC # Batch Migration Validation
@@ -288,18 +287,18 @@ for entry in tables_to_validate:
     src = entry["source"]
     tgt = entry["target"]
     pk = entry["pk"]
-    
+
     try:
         src_df = spark.table(src)
         tgt_df = spark.table(tgt)
-        
+
         src_count = src_df.count()
         tgt_count = tgt_df.count()
         diff_pct = abs(src_count - tgt_count) / max(src_count, 1) * 100
-        
+
         tgt_dupes = tgt_count - tgt_df.select(pk).distinct().count()
         tgt_nulls = tgt_df.filter(F.col(pk).isNull()).count()
-        
+
         status = "PASS" if diff_pct < 0.1 and tgt_dupes == 0 and tgt_nulls == 0 else "FAIL"
         results_summary.append((name, status, src_count, tgt_count, diff_pct, tgt_dupes))
     except Exception as e:
@@ -325,10 +324,10 @@ failed = sum(1 for r in results_summary if r[1] != "PASS")
 print(f"\nSummary: {{passed}} passed, {{failed}} failed out of {{len(results_summary)}} pipelines")
 '''
 
-    def generate_business_rule_tests(self, table: str, rules: List[Dict]) -> str:
+    def generate_business_rule_tests(self, table: str, rules: list[dict]) -> str:
         """
         Generate business rule validation SQL.
-        
+
         Args:
             table: Fully qualified table name
             rules: List of dicts with keys: name, condition, threshold (0-1)
@@ -343,12 +342,12 @@ SELECT
   SUM(CASE WHEN {rule['condition']} THEN 1 ELSE 0 END) as passing_rows,
   ROUND(SUM(CASE WHEN {rule['condition']} THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 2) as pass_rate,
   {rule.get('threshold', 0.99) * 100} as required_rate,
-  CASE 
+  CASE
     WHEN SUM(CASE WHEN {rule['condition']} THEN 1 ELSE 0 END) * 1.0 / COUNT(*) >= {rule.get('threshold', 0.99)}
     THEN 'PASS' ELSE 'FAIL'
   END as status
 FROM {table}""")
-        
+
         union_sql = "\nUNION ALL\n".join(checks)
         return f"""-- Business Rule Validation for {table}
 -- Generated by aws2lakehouse.validation

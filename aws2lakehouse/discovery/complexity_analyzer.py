@@ -1,9 +1,8 @@
 """Complexity Analyzer — Classifies pipelines by migration difficulty."""
 
-from typing import Dict, List, Any
-from dataclasses import dataclass, field
-import re
 import logging
+import re
+from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
@@ -24,8 +23,8 @@ class ComplexityScore:
     uses_hive_metastore: bool = False
     estimated_hours: float = 0.0
     recommended_approach: str = ""
-    findings: List[str] = field(default_factory=list)
-    blockers: List[str] = field(default_factory=list)
+    findings: list[str] = field(default_factory=list)
+    blockers: list[str] = field(default_factory=list)
 
 
 class ComplexityAnalyzer:
@@ -34,9 +33,9 @@ class ComplexityAnalyzer:
     EFFORT_MAP = {"simple": 4, "medium": 16, "complex": 40, "critical": 80}
 
     def __init__(self):
-        self.results: List[ComplexityScore] = []
+        self.results: list[ComplexityScore] = []
 
-    def analyze_code(self, source_code: str, metadata: Dict = None) -> ComplexityScore:
+    def analyze_code(self, source_code: str, metadata: dict = None) -> ComplexityScore:
         """Analyze source code and return complexity score."""
         metadata = metadata or {}
         findings = []

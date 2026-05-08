@@ -1,0 +1,2 @@
+[console_scripts]
+aws2lakehouse = aws2lakehouse.cli:main

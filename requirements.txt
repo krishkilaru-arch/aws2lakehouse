@@ -1,8 +1,12 @@
 # ═══════════════════════════════════════════════════════════════════════════════
 # aws2lakehouse — Python Dependencies
 # ═══════════════════════════════════════════════════════════════════════════════
-# Install: pip install -r requirements.txt
-# Minimal: pip install pyyaml requests  (core only, no scanning)
+# Canonical dependencies are in pyproject.toml. This file is for convenience
+# when installing outside of pip install -e .
+#
+# Minimal:  pip install pyyaml requests
+# Full:     pip install -r requirements.txt
+# Dev:      pip install -e ".[dev]"
 # ═══════════════════════════════════════════════════════════════════════════════
 
 # ── Core (always required) ─────────────────────────────────────────────────────
@@ -10,17 +14,12 @@ pyyaml>=6.0                 # YAML spec parsing (factory, pipeline configs)
 requests>=2.28              # HTTP client for Foundation Model API (--ai mode)
 
 # ── AWS Scanning (optional — for live inventory from AWS accounts) ─────────────
-boto3>=1.28                 # EMR/Glue/S3/StepFunctions scanner
+# boto3>=1.28               # pip install aws2lakehouse[aws]
 
 # ── Databricks (optional — for workspace deployment & AI features) ─────────────
-databricks-sdk>=0.20        # Workspace auth, bundle deploy, secrets access
+# databricks-sdk>=0.20      # pip install aws2lakehouse[databricks]
 
-# ── Data Validation (optional — for running generated pytest suites) ───────────
-pytest>=7.0                 # Runs migration validation tests
-pyspark>=3.4               # Local Spark testing (pre-installed on Databricks)
-great-expectations>=0.18    # Alternative DQ engine (if not using SDP expectations)
-
-# ── Development ────────────────────────────────────────────────────────────────
-black>=23.0                 # Code formatting (PEP 8 style)
-mypy>=1.0                   # Static type checking
-ruff>=0.1                   # Fast Python linter
+# ── Development & Testing ──────────────────────────────────────────────────────
+# pytest>=7.0               # pip install aws2lakehouse[dev]
+# pytest-cov>=4.0
+# ruff>=0.1

@@ -1,0 +1,19 @@
+resources:
+  jobs:
+    silver_to_gold:
+      name: "[prod] finance/silver_to_gold"
+      description: "Migrated from AWS: auto_loader → finance_bronze"
+      tasks:
+        - task_key: silver_to_gold
+          notebook_task:
+            notebook_path: pipelines/finance/silver_to_gold
+            base_parameters:
+              CATALOG: "acme_prod"
+              SCHEMA: "finance_bronze"
+              TABLE: "silver_to_gold"
+          max_retries: 2
+          timeout_seconds: 3600
+      tags:
+        domain: "finance"
+        layer: "bronze"
+        classification: "internal"

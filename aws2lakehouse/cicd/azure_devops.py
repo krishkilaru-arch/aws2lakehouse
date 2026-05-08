@@ -3,11 +3,11 @@
 
 class AzureDevOpsPipeline:
     """Generates azure-pipelines.yml for DAB deployment."""
-    
+
     @staticmethod
     def generate(project_name: str, environments: list = None) -> str:
         environments = environments or ["dev", "staging", "production"]
-        return f"""# Azure DevOps Pipeline for Databricks Asset Bundles
+        return """# Azure DevOps Pipeline for Databricks Asset Bundles
 trigger:
   branches:
     include:
